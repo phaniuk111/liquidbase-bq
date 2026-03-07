@@ -67,10 +67,8 @@ class LiquibaseConfigTest {
         setField(config, "changeLog", "classpath:db/changelog/db.changelog-master.xml");
         setField(config, "datasourceUrl", "jdbc:bigquery://host");
 
-        SpringLiquibase liquibase = config.liquibase(dataSource);
-
-        assertNotNull(liquibase);
-        assertNull(liquibase.getContexts());
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> config.liquibase(dataSource));
+        assertTrue(e.getMessage().contains("Exactly one active Spring"));
     }
 
     @Test
@@ -82,10 +80,8 @@ class LiquibaseConfigTest {
         setField(config, "changeLog", "classpath:db/changelog/db.changelog-master.xml");
         setField(config, "datasourceUrl", "jdbc:bigquery://host;ProjectId=p;DefaultDataset=d");
 
-        SpringLiquibase liquibase = config.liquibase(dataSource);
-
-        assertNotNull(liquibase);
-        assertEquals("dev1,local", liquibase.getContexts());
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> config.liquibase(dataSource));
+        assertTrue(e.getMessage().contains("Exactly one active Spring"));
     }
 
     private void setField(Object target, String fieldName, Object value) throws Exception {

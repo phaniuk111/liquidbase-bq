@@ -150,15 +150,16 @@ public class BigQuerySchemaService {
      * Print the status of all changesets — which are pending and which are applied.
      */
     public void getChangeSetStatus() throws Exception {
+        String activeProfile = getActiveProfile();
         try (Liquibase liquibase = createLiquibase()) {
             List<ChangeSetStatus> statusList = liquibase.getChangeSetStatuses(
-                    new Contexts(getActiveProfile()), new LabelExpression());
+                    new Contexts(activeProfile), new LabelExpression());
 
             int applied = 0;
             int pending = 0;
 
             log.info("┌─────────────────────────────────────────────────────────────────────┐");
-            log.info("│  Changeset Status — [{}]", getActiveProfile());
+            log.info("│  Changeset Status — [{}]", activeProfile);
             log.info("├─────────────────────────────────────────────────────────────────────┤");
 
             for (ChangeSetStatus status : statusList) {

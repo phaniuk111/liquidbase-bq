@@ -146,7 +146,16 @@ public class BigQueryBackupService {
     }
 
     /**
-     * Restore tables from a snapshot dataset.
+     * Restore multiple tables from their snapshots.
+     * <p>
+     * <b>WARNING (Non-Atomic Operation):</b> BigQuery does not support multi-table
+     * transactions. If a restore operation fails mid-way (e.g., table 5 of 10
+     * fails),
+     * tables 1-4 will have been restored, but tables 5-10 will not, leaving the
+     * dataset in a partial/inconsistent state. For production, consider restoring
+     * to
+     * a staging dataset first, then swapping.
+     * </p>
      *
      * @param snapshotSuffix the suffix used when creating snapshots
      */
@@ -426,16 +435,17 @@ public class BigQueryBackupService {
      * BigQuery retains data for 7 days by default.
      */
     public String generateTimeTravelSql(String tableName, String timestamp) {
+        String safeTableName = tableName.replaceAll("[^a-zA-Z0-9_]", "_");
         String sql = String.format(
                 "-- Time Travel Recovery: %s at %s\n" +
                         "CREATE OR REPLACE TABLE `%s.%s.%s` AS\n" +
                         "SELECT * FROM `%s.%s.%s`\n" +
                         "FOR SYSTEM_TIME AS OF TIMESTAMP '%s'",
-                tableName, timestamp,
-                projectId, datasetId, tableName,
-                projectId, datasetId, tableName,
+                safeTableName, timestamp,
+                projectId, datasetId, safeTableName,
+                projectId, datasetId, safeTableName,
                 timestamp);
-        log.info("Time-travel SQL generated for {} at {}", tableName, timestamp);
+        log.info("Time-travel SQL generated for {} at {}", safeTableName, timestamp);
         return sql;
     }
 

@@ -71,6 +71,9 @@ public class SchemaManagerRunner implements CommandLineRunner {
             } else if (arg.startsWith("--count=")) {
                 try {
                     count = Integer.parseInt(arg.substring("--count=".length()));
+                    if (count <= 0) {
+                        throw new IllegalArgumentException("Invalid value for --count it must be greater than 0");
+                    }
                 } catch (NumberFormatException e) {
                     throw new IllegalArgumentException(
                             "Invalid value for --count it must be a valid integer, e.g., --count=3", e);

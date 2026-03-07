@@ -149,9 +149,8 @@ public class ValidationConfig {
             }
             if (change instanceof liquibase.change.core.SQLFileChange) {
                 liquibase.change.core.SQLFileChange sqlFileChange = (liquibase.change.core.SQLFileChange) change;
-                try {
-                    java.io.InputStream is = new org.springframework.core.io.ClassPathResource(sqlFileChange.getPath())
-                            .getInputStream();
+                try (java.io.InputStream is = new org.springframework.core.io.ClassPathResource(sqlFileChange.getPath())
+                        .getInputStream()) {
                     String sql = new String(is.readAllBytes()).toUpperCase();
                     if (sql.contains("DROP TABLE") || sql.contains("TRUNCATE") || sql.contains("DELETE FROM")
                             || sql.contains("DROP COLUMN")) {

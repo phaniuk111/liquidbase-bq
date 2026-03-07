@@ -69,9 +69,11 @@ public class LiquibaseConfig {
     @Bean
     public SpringLiquibase liquibase(DataSource dataSource) {
         String[] activeProfiles = environment.getActiveProfiles();
-        String profileName = activeProfiles.length > 0
-                ? String.join(", ", activeProfiles)
-                : "default";
+        if (activeProfiles.length != 1) {
+            throw new IllegalStateException(
+                    "Exactly one active Spring profile is required, but found: " + activeProfiles.length);
+        }
+        String profileName = activeProfiles[0];
 
         // Extract project and dataset from JDBC URL for logging
         String projectId = extractUrlParam(datasourceUrl, "ProjectId");
