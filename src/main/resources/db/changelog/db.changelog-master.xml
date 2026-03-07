@@ -10,40 +10,22 @@
         Each file covers a specific category of schema operations.
     -->
 
-    <!-- 1. Create base tables (flat + nested STRUCT) -->
-    <include file="db/changelog/001-create-tables.xml"/>
-
-    <!-- 2. Add new columns to existing tables -->
-    <include file="db/changelog/002-add-columns.xml"/>
-
-    <!-- 3. Modify data types of existing columns -->
-    <include file="db/changelog/003-modify-datatypes.xml"/>
-
-    <!-- 4. Drop columns -->
-    <include file="db/changelog/004-drop-columns.xml"/>
-
-    <!-- 5. Rename columns -->
-    <include file="db/changelog/005-rename-columns.xml"/>
-
-    <!-- 6. Nested STRUCT/RECORD operations (BigQuery-specific workarounds) -->
-    <include file="db/changelog/006-nested-struct-operations.xml"/>
-
-    <!-- 7. Create and drop views -->
-    <include file="db/changelog/007-views.xml"/>
+    <!-- 1. Initialize Baseline Schema -->
+    <include file="db/changelog/001-init-schema.xml"/>
 
     <!-- 
-      8+. SQL-FIRST MIGRATION EXAMPLES
-      Future state migrations should use raw SQL files wrapped in XML.
+      ====================================================================
+      DEVELOPER INSTRUCTIONS: SQL-FIRST WORKFLOW
+      ====================================================================
+      All future schema migrations MUST use raw SQL files wrapped in XML.
+      Do NOT use Liquibase-native tags (<createTable>, <addColumn>, etc.)
       
-      Example:
-      <include file="db/changelog/008-example-sql-wrapper.xml"/>
-      
-      Where `008-example-sql-wrapper.xml` contains:
-      <changeSet id="008..." author="..." context="...">
-          <sqlFile path="db/changelog/sql/ddl/008-script.sql" splitStatements="true" stripComments="true"/>
-          <rollback>
-              <sqlFile path="db/changelog/sql/rollback/008-script.sql" splitStatements="true" stripComments="true"/>
-          </rollback>
-      </changeSet>
+      To create a new migration:
+      1. Run the scaffold tool (make sure to include --register-master):
+         `./mvnw exec:java@scaffold -Dscript.name="your-change-name" -Ddomain="your_domain" -Dcontexts="dev,uat,prd" -Dlabels="feature-123" --register-master`
+      2. This will automatically generate the SQL and XML files, and 
+         register the new XML wrapper in this file automatically.
+      3. Write your standard BigQuery SQL in the generated `.sql` files.
+      ====================================================================
     -->
 </databaseChangeLog>
