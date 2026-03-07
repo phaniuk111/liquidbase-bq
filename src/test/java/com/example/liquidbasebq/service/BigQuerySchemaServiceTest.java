@@ -347,22 +347,15 @@ class BigQuerySchemaServiceTest {
     class ProfileHandlingTests {
 
         @Test
-        @DisplayName("should use 'default' when no active profile")
-        void shouldUseDefaultProfile() throws Exception {
+        @DisplayName("should throw IllegalStateException when no active profile")
+        void shouldThrowExceptionWhenNoProfile() {
             when(environment.getActiveProfiles()).thenReturn(new String[] {});
 
-            try (MockedConstruction<Liquibase> ignored = mockConstruction(Liquibase.class,
-                    (mock, ctx) -> doNothing().when(mock).update(any(Contexts.class), any(LabelExpression.class)))) {
+            IllegalStateException e = assertThrows(IllegalStateException.class, () -> {
+                service.updateSchema();
+            });
 
-                when(dataSource.getConnection()).thenReturn(connection);
-                try (MockedStatic<DatabaseFactory> dbFactory = mockStatic(DatabaseFactory.class)) {
-                    DatabaseFactory mockFactory = mock(DatabaseFactory.class);
-                    dbFactory.when(DatabaseFactory::getInstance).thenReturn(mockFactory);
-                    when(mockFactory.findCorrectDatabaseImplementation(any(JdbcConnection.class))).thenReturn(database);
-
-                    assertDoesNotThrow(() -> service.updateSchema());
-                }
-            }
+            assertTrue(e.getMessage().contains("Exactly one active Spring profile is required"));
         }
     }
 }

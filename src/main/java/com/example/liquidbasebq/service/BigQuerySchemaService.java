@@ -261,7 +261,11 @@ public class BigQuerySchemaService {
      */
     private String getActiveProfile() {
         String[] profiles = environment.getActiveProfiles();
-        return profiles.length > 0 ? profiles[0] : "default";
+        if (profiles.length != 1) {
+            throw new IllegalStateException(
+                    "Exactly one active Spring profile is required, but found: " + profiles.length);
+        }
+        return profiles[0];
     }
 
     /**
@@ -269,8 +273,14 @@ public class BigQuerySchemaService {
      */
     public Liquibase createLiquibase() throws Exception {
         Connection connection = dataSource.getConnection();
-        Database database = DatabaseFactory.getInstance()
-                .findCorrectDatabaseImplementation(new JdbcConnection(connection));
+        Database database;
+        try {
+            database = DatabaseFactory.getInstance()
+                    .findCorrectDatabaseImplementation(new JdbcConnection(connection));
+        } catch (Exception e) {
+            connection.close();
+            throw e;
+        }
 
         String resolvedChangeLog = changeLogFile.replace("classpath:", "");
 

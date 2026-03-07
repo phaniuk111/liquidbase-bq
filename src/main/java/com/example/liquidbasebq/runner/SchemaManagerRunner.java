@@ -69,7 +69,12 @@ public class SchemaManagerRunner implements CommandLineRunner {
             } else if (arg.startsWith("--table=")) {
                 table = arg.substring("--table=".length());
             } else if (arg.startsWith("--count=")) {
-                count = Integer.parseInt(arg.substring("--count=".length()));
+                try {
+                    count = Integer.parseInt(arg.substring("--count=".length()));
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException(
+                            "Invalid value for --count it must be a valid integer, e.g., --count=3", e);
+                }
             } else if (arg.startsWith("--timestamp=")) {
                 timestamp = arg.substring("--timestamp=".length());
             } else if (arg.startsWith("--format=")) {
@@ -167,11 +172,11 @@ public class SchemaManagerRunner implements CommandLineRunner {
 
                 // Write metadata for CI/CD artifact
                 try {
-                    java.io.File targetDir = new java.io.File("target");
+                    java.io.File targetDir = new java.io.File(System.getProperty("user.dir"), "target");
                     if (!targetDir.exists())
                         targetDir.mkdirs();
                     java.nio.file.Files.writeString(
-                            java.nio.file.Paths.get("target/backup-metadata.properties"),
+                            new java.io.File(targetDir, "backup-metadata.properties").toPath(),
                             "BACKUP_PROFILE=" + profile + "\nBACKUP_SUFFIX=" + activeTag + "\nBACKUP_TIMESTAMP="
                                     + java.time.Instant.now().toString() + "\n");
                 } catch (Exception e) {
@@ -271,6 +276,10 @@ public class SchemaManagerRunner implements CommandLineRunner {
 
     private String getActiveProfile() {
         String[] profiles = environment.getActiveProfiles();
-        return profiles.length > 0 ? profiles[0] : "default";
+        if (profiles.length != 1) {
+            throw new IllegalStateException(
+                    "Exactly one active Spring profile is required, but found: " + profiles.length);
+        }
+        return profiles[0];
     }
 }

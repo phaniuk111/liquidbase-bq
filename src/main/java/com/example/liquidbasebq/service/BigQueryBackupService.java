@@ -10,10 +10,11 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import jakarta.annotation.PostConstruct;
 
 /**
  * BigQuery backup service — multiple strategies for data protection.
@@ -35,7 +36,8 @@ import java.util.List;
 public class BigQueryBackupService {
 
     private static final Logger log = LoggerFactory.getLogger(BigQueryBackupService.class);
-    private static final DateTimeFormatter TIMESTAMP_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
+    private static final DateTimeFormatter TIMESTAMP_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
+            .withZone(java.time.ZoneOffset.UTC);
 
     private final DataSource dataSource;
     private final Environment environment;
@@ -57,6 +59,16 @@ public class BigQueryBackupService {
     public BigQueryBackupService(DataSource dataSource, Environment environment) {
         this.dataSource = dataSource;
         this.environment = environment;
+    }
+
+    @PostConstruct
+    public void validateConfig() {
+        if (projectId == null || projectId.isBlank()) {
+            throw new IllegalStateException("BQ_PROJECT_ID is not configured");
+        }
+        if (datasetId == null || datasetId.isBlank()) {
+            throw new IllegalStateException("BQ_DATASET_ID is not configured");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -307,7 +319,7 @@ public class BigQueryBackupService {
         String exportFormat = (format == null || format.isBlank()) ? "PARQUET" : format.toUpperCase();
         String safeSuffix = exportSuffix.replaceAll("[^a-zA-Z0-9_]", "_");
         String profile = getActiveProfile();
-        String timestamp = LocalDateTime.now().format(TIMESTAMP_FMT);
+        String timestamp = TIMESTAMP_FMT.format(Instant.now());
         String gcsPath = String.format("%s/backups/%s/%s_%s",
                 gcsBucket.replaceAll("/$", ""), profile, safeSuffix, timestamp);
         List<String> executedSql = new ArrayList<>();
@@ -437,7 +449,7 @@ public class BigQueryBackupService {
      * @return the snapshot suffix (use this to restore if needed)
      */
     public String autoBackup() throws Exception {
-        String timestamp = LocalDateTime.now().format(TIMESTAMP_FMT);
+        String timestamp = TIMESTAMP_FMT.format(Instant.now());
         String suffix = getActiveProfile() + "_" + timestamp;
         createTableSnapshots(suffix);
         return suffix;
@@ -466,6 +478,10 @@ public class BigQueryBackupService {
 
     private String getActiveProfile() {
         String[] profiles = environment.getActiveProfiles();
-        return profiles.length > 0 ? profiles[0] : "default";
+        if (profiles.length != 1) {
+            throw new IllegalStateException(
+                    "Exactly one active Spring profile is required, but found: " + profiles.length);
+        }
+        return profiles[0];
     }
 }
