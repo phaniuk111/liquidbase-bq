@@ -1,0 +1,180 @@
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║  FEATURE BRANCH — PR Validation Workflow                        ║
+# ║  Triggered on: Pull Requests to main                            ║
+# ║  Jobs: Build → Unit Tests → Validate XML → Dry-Run SQL          ║
+# ╚═══════════════════════════════════════════════════════════════════╝
+
+name: Feature Branch — Validate & Dry Run
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '17'
+  JAVA_DISTRIBUTION: 'temurin'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  #  Job 1: Build, Test, & Validate
+  # ────────────────────────────────────────────────────────────────
+  build-test-validate:
+    name: Build, Test & Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      - name: Download and Install Simba Driver
+        run: |
+          wget -q https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || echo "Failed to download, assuming cached or unavailable"
+          unzip -q SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || true
+          ./mvnw install:install-file -Dfile=GoogleBigQueryJDBC42.jar -DgroupId=com.simba.googlebigquery.jdbc -DartifactId=GoogleBigQueryJDBC42 -Dversion=1.6.3.1004 -Dpackaging=jar -q
+
+      - name: Compile project
+        run: ./mvnw compile -q -B
+
+      - name: Run unit tests
+        run: |
+          ./mvnw test -B
+          echo "✅ All unit tests passed"
+
+      - name: Validate changelog XML
+        run: |
+          echo "Validating Liquibase changelog structure..."
+          for f in src/main/resources/db/changelog/*.xml; do
+            echo "  ✓ Validating: $f"
+            xmllint --noout "$f" 2>&1 || exit 1
+          done
+          echo "✅ All changelog files are valid XML"
+
+      - name: Strict Changeset Validation
+        id: validate-strict
+        run: |
+          echo "Running strict structural and risk validation..."
+          VALIDATION_OUT=$(./mvnw spring-boot:run -q -B \
+            -Dspring-boot.run.profiles=dev1 \
+            -Dspring-boot.run.arguments="--action=validate-strict" 2>&1) || {
+              echo "strict_error<<EOF" >> $GITHUB_OUTPUT
+              echo "$VALIDATION_OUT" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              echo "$VALIDATION_OUT"
+              exit 1
+            }
+          echo "✅ Strict validation passed"
+
+      - name: Post Validation Error Comment
+        if: failure() && steps.validate-strict.outputs.strict_error != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '### 🚨 Strict Validation Failed\n\n```text\n' + process.env.VALIDATION_OUT + '\n```\n\nPlease fix the issues using the provided remediation snippets and push again.'
+            })
+        env:
+          VALIDATION_OUT: ${{ steps.validate-strict.outputs.strict_error }}
+
+  # ────────────────────────────────────────────────────────────────
+  #  Job 2: Dry-Run SQL against DEV
+  # ────────────────────────────────────────────────────────────────
+  dry-run-dev:
+    name: Dry-Run SQL (DEV)
+    runs-on: ubuntu-latest
+    needs: build-test-validate
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      - name: Authenticate to GCP (DEV)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download and Install Simba Driver
+        run: |
+          wget -q https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || echo "Failed to download, assuming cached or unavailable"
+          unzip -q SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || true
+          ./mvnw install:install-file -Dfile=GoogleBigQueryJDBC42.jar -DgroupId=com.simba.googlebigquery.jdbc -DartifactId=GoogleBigQueryJDBC42 -Dversion=1.6.3.1004 -Dpackaging=jar -q
+
+      - name: Generate update SQL (dry-run)
+        id: dry-run
+        env:
+          BQ_PROJECT_ID: ${{ secrets.DEV_BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.DEV_BQ_DATASET_ID }}
+        run: |
+          echo "Generating SQL for DEV environment..."
+          ./mvnw spring-boot:run -q -B \
+            -Dspring-boot.run.profiles=dev1 \
+            -Dspring-boot.run.arguments="--action=update-sql" 2>&1 | tee /tmp/dry-run-sql.txt
+          SQL=$(cat /tmp/dry-run-sql.txt)
+          echo "sql<<EOF" >> $GITHUB_OUTPUT
+          echo "$SQL" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post SQL as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sql = `${{ steps.dry-run.outputs.sql }}`;
+
+            // Flag risky operations
+            const risks = [];
+            if (sql.match(/DROP\s+(TABLE|COLUMN)/gi)) risks.push('🔴 DROP detected');
+            if (sql.match(/TRUNCATE/gi)) risks.push('🔴 TRUNCATE detected');
+            if (sql.match(/DELETE\s+FROM/gi)) risks.push('🔴 DELETE detected');
+            if (sql.match(/ALTER.*SET\s+DATA\s+TYPE/gi)) risks.push('🟡 Data type change detected');
+
+            const riskBanner = risks.length > 0
+              ? `\n> ⚠️ **Data Loss Risks Detected:**\n${risks.map(r => `> - ${r}`).join('\n')}\n`
+              : '\n> ✅ No data loss risks detected\n';
+
+            const body = `### 🔍 Liquibase Dry-Run SQL (DEV)
+            ${riskBanner}
+            \`\`\`sql
+            ${sql.substring(0, 60000)}
+            \`\`\`
+
+            > Generated from changelog against **DEV** environment.
+            > Review carefully before merging to \`main\`.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body,
+            });

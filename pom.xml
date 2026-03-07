@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.example</groupId>
+    <artifactId>liquidbase-bq</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <name>Liquibase BigQuery Schema Manager</name>
+    <description>Manage Google BigQuery schema using Liquibase — supports nested STRUCT/RECORD columns</description>
+
+    <properties>
+        <java.version>17</java.version>
+        <liquibase.version>4.33.0</liquibase.version>
+        <liquibase-bigquery.version>4.33.0</liquibase-bigquery.version>
+    </properties>
+
+    <dependencies>
+        <!-- ======================== Spring Boot ======================== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+
+        <!-- ======================== Liquibase ========================== -->
+        <dependency>
+            <groupId>org.liquibase</groupId>
+            <artifactId>liquibase-core</artifactId>
+            <version>${liquibase.version}</version>
+        </dependency>
+
+        <!-- Liquibase BigQuery Extension -->
+        <dependency>
+            <groupId>org.liquibase.ext</groupId>
+            <artifactId>liquibase-bigquery</artifactId>
+            <version>${liquibase-bigquery.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.simba.googlebigquery.jdbc</groupId>
+                    <artifactId>GoogleBigQueryJDBC42</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.simba.googlebigquery.jdbc42</groupId>
+                    <artifactId>GoogleBigQueryJDBC42</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.simba.googlebigquery</groupId>
+                    <artifactId>GoogleBigQueryJDBC42</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ======================== BigQuery JDBC ====================== -->
+        <!-- Google Cloud BigQuery API Client (used for Backups) -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-bigquery</artifactId>
+            <version>2.41.0</version>
+        </dependency>
+
+        <!-- Simba JDBC Driver (Required by Liquibase-BigQuery) -->
+        <dependency>
+            <groupId>com.simba.googlebigquery.jdbc</groupId>
+            <artifactId>GoogleBigQueryJDBC42</artifactId>
+            <version>1.6.3.1004</version>
+        </dependency>
+
+        <!-- ======================== Logging ============================ -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!-- ======================== Test ================================ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- Maven Surefire: JDK 16+ needs add-opens for Mockito byte-buddy -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
+
+            <!-- Maven Enforcer Plugin for Strict JDK 17 Policy -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.4.1</version>
+                <executions>
+                    <execution>
+                        <id>enforce-java</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[17,)</version>
+                                    <message>Java 17 or higher is required.</message>
+                                </requireJavaVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Liquibase Maven Plugin -->
+            <plugin>
+                <groupId>org.liquibase</groupId>
+                <artifactId>liquibase-maven-plugin</artifactId>
+                <version>${liquibase.version}</version>
+                <configuration>
+                    <changeLogFile>src/main/resources/db/changelog/db.changelog-master.xml</changeLogFile>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.liquibase.ext</groupId>
+                        <artifactId>liquibase-bigquery</artifactId>
+                        <version>${liquibase-bigquery.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>com.simba.googlebigquery.jdbc</groupId>
+                        <artifactId>GoogleBigQueryJDBC42</artifactId>
+                        <version>1.6.3.1004</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+        </plugins>
+    </build>
+</project>

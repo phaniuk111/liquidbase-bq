@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="compliant-changeset" author="test" context="dev,prd" labels="JIRA-123">
+        <!-- Safe operation -->
+        <sql>CREATE TABLE test_table (id INT)</sql>
+        <rollback>
+            <sql>DROP TABLE test_table</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="compliant-destructive" author="test" context="dev,prd" labels="JIRA-123">
+        <preConditions onFail="MARK_RAN">
+            <tableExists tableName="test_table"/>
+        </preConditions>
+        <sql>DROP TABLE test_table</sql>
+        <rollback>
+            <sql>CREATE TABLE test_table (id INT)</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

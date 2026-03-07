@@ -1,0 +1,135 @@
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║  RESTORE — Emergency Restore from Snapshot                      ║
+# ║  Triggered on: Manual dispatch only (pinned to main)            ║
+# ║  Supports: Single-table restore and full-dataset restore        ║
+# ║  Uses: Immutable JAR from the deploy that created the snapshot  ║
+# ╚═══════════════════════════════════════════════════════════════════╝
+
+name: Restore from Snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_profile:
+        description: 'Target environment profile'
+        required: true
+        type: choice
+        options:
+          - dev1
+          - dev2
+          - prl1
+          - uat1
+          - uat2
+          - prd
+      snapshot_suffix:
+        description: 'Snapshot suffix (from deploy logs, e.g. dev1_20260307_051513)'
+        required: true
+        type: string
+      restore_type:
+        description: 'Restore scope'
+        required: true
+        type: choice
+        options:
+          - single-table
+          - all-tables
+      table_name:
+        description: 'Table name (required for single-table restore)'
+        required: false
+        type: string
+      deploy_run_id:
+        description: 'GitHub Actions run ID of the deploy that created the snapshot (find in Actions tab)'
+        required: true
+        type: string
+
+env:
+  JAVA_VERSION: '17'
+  JAVA_DISTRIBUTION: 'temurin'
+
+jobs:
+  restore:
+    name: "Restore ${{ inputs.restore_type }} on ${{ inputs.target_profile }}"
+    runs-on: ubuntu-latest
+    # Only allow restore from main branch
+    if: github.ref == 'refs/heads/main'
+    environment: ${{ inputs.target_profile == 'prd' && 'prd' || inputs.target_profile == 'uat1' && 'uat' || inputs.target_profile == 'uat2' && 'uat' || inputs.target_profile == 'prl1' && 'prl1' || 'dev' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Validate inputs
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "❌ Restore can only be dispatched from the main branch."
+            exit 1
+          fi
+          if [ "${{ inputs.restore_type }}" = "single-table" ] && [ -z "${{ inputs.table_name }}" ]; then
+            echo "❌ Table name is required for single-table restore."
+            exit 1
+          fi
+          if [ -z "${{ inputs.deploy_run_id }}" ]; then
+            echo "❌ deploy_run_id is required to download the correct JAR artifact."
+            exit 1
+          fi
+          echo "✅ Inputs validated"
+          echo "  Profile:    ${{ inputs.target_profile }}"
+          echo "  Snapshot:   ${{ inputs.snapshot_suffix }}"
+          echo "  Type:       ${{ inputs.restore_type }}"
+          echo "  Table:      ${{ inputs.table_name || '(all tables)' }}"
+          echo "  Deploy Run: ${{ inputs.deploy_run_id }}"
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: liquidbase-bq-jar
+          run-id: ${{ inputs.deploy_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Identify JAR
+        id: jar
+        run: |
+          JAR_FILE=$(ls liquidbase-bq-*.jar 2>/dev/null | head -1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "❌ No JAR artifact found. Provide a valid deploy_run_id."
+            exit 1
+          fi
+          echo "jar_name=$JAR_FILE" >> $GITHUB_OUTPUT
+          echo "📦 Using JAR: $JAR_FILE"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: "Restore: ${{ inputs.restore_type }}"
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          if [ "${{ inputs.restore_type }}" = "single-table" ]; then
+            echo "🔧 Restoring single table '${{ inputs.table_name }}' on ${{ inputs.target_profile }}..."
+            java -jar "${{ steps.jar.outputs.jar_name }}" \
+              --spring.profiles.active=${{ inputs.target_profile }} \
+              --action=restore-table \
+              --tag=${{ inputs.snapshot_suffix }} \
+              --table=${{ inputs.table_name }}
+          else
+            echo "⚠️ Restoring ALL tables on ${{ inputs.target_profile }}..."
+            java -jar "${{ steps.jar.outputs.jar_name }}" \
+              --spring.profiles.active=${{ inputs.target_profile }} \
+              --action=restore \
+              --tag=${{ inputs.snapshot_suffix }}
+          fi
+
+          echo "✅ Restore completed on ${{ inputs.target_profile }}"

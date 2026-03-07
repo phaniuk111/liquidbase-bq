@@ -1,0 +1,538 @@
+# ╔═══════════════════════════════════════════════════════════════════╗
+# ║  MAIN BRANCH — Trunk-Based Deployment Workflow                  ║
+# ║  Triggered on: Push to main                                     ║
+# ║  Pipeline: Build JAR → DEV(1,2) → PRL1 → UAT(1,2) → PRD       ║
+# ║  SDLC: Build once, deploy immutable JAR everywhere              ║
+# ╚═══════════════════════════════════════════════════════════════════╝
+
+name: Main — Deploy to All Environments
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+
+  # Manual trigger with environment + dataset selection
+  workflow_dispatch:
+    inputs:
+      target_profile:
+        description: 'Target profile (leave empty for full pipeline)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - dev1
+          - dev2
+          - prl1
+          - uat1
+          - uat2
+          - prd
+      action:
+        description: 'Liquibase action'
+        required: false
+        default: 'update'
+        type: choice
+        options:
+          - update
+          - update-sql
+          - status
+          - rollback
+          - history
+          - validate
+      rollback_tag:
+        description: 'Rollback tag (required if action=rollback)'
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  JAVA_VERSION: '17'
+  JAVA_DISTRIBUTION: 'temurin'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  #  Job 1: Build, Test, Package JAR
+  # ────────────────────────────────────────────────────────────────
+  build:
+    name: Build, Test & Package JAR
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      jar_name: ${{ steps.version.outputs.jar_name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      - name: Download and Install Simba Driver
+        run: |
+          wget -q https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || echo "Failed to download, assuming cached"
+          unzip -q SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || true
+          ./mvnw install:install-file -Dfile=GoogleBigQueryJDBC42.jar -DgroupId=com.simba.googlebigquery.jdbc -DartifactId=GoogleBigQueryJDBC42 -Dversion=1.6.3.1004 -Dpackaging=jar -q
+
+      - name: Compile & validate
+        run: |
+          ./mvnw compile -q -B
+          echo "✅ Build successful"
+
+      - name: Run unit tests
+        run: |
+          ./mvnw test -B
+          echo "✅ All unit tests passed"
+
+      - name: Validate changelog XML
+        run: |
+          for f in src/main/resources/db/changelog/*.xml; do
+            xmllint --noout "$f" 2>&1 || exit 1
+          done
+          echo "✅ All changelogs valid"
+
+      - name: Set semantic version
+        id: version
+        run: |
+          POM_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout -B | sed 's/-SNAPSHOT//')
+          SHORT_SHA=${GITHUB_SHA::8}
+          BUILD_NUM=${{ github.run_number }}
+          SEMVER="${POM_VERSION}-${BUILD_NUM}+${SHORT_SHA}"
+          JAR_FILE="liquidbase-bq-${SEMVER}.jar"
+          echo "version=$SEMVER" >> $GITHUB_OUTPUT
+          echo "jar_name=$JAR_FILE" >> $GITHUB_OUTPUT
+          echo "📦 Version: $SEMVER"
+
+      - name: Package fat JAR
+        run: |
+          ./mvnw package -DskipTests -q -B
+          BUILT_JAR=$(find target -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'original-*.jar' | head -1)
+          cp "$BUILT_JAR" ${{ steps.version.outputs.jar_name }}
+          echo "✅ JAR packaged: ${{ steps.version.outputs.jar_name }} (from $BUILT_JAR)"
+          ls -lh ${{ steps.version.outputs.jar_name }}
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquidbase-bq-jar
+          path: ${{ steps.version.outputs.jar_name }}
+          retention-days: 90
+
+
+
+  # ────────────────────────────────────────────────────────────────
+  #  Job 2: Deploy to DEV datasets (dev1, dev2) — auto
+  # ────────────────────────────────────────────────────────────────
+  deploy-dev:
+    name: Deploy DEV (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    needs: build
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.target_profile == '' || inputs.target_profile == 'dev1' || inputs.target_profile == 'dev2'))
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [dev1, dev2]
+        exclude:
+          - profile: ${{ github.event_name == 'workflow_dispatch' && inputs.target_profile != '' && inputs.target_profile != 'dev1' && 'dev1' || 'NONE' }}
+          - profile: ${{ github.event_name == 'workflow_dispatch' && inputs.target_profile != '' && inputs.target_profile != 'dev2' && 'dev2' || 'NONE' }}
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: liquidbase-bq-jar
+
+      - name: Authenticate to GCP (DEV)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Tag before deploy
+        if: ${{ (inputs.action || 'update') == 'update' || (inputs.action || 'update') == 'rollback' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            --action=tag --tag=pre-deploy-${{ needs.build.outputs.version }}
+
+      - name: Backup Dataset
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          echo "📸 Taking pre-deploy snapshot..."
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            --action=backup
+
+      - name: Upload Backup Evidence
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-metadata-${{ matrix.profile }}-${{ github.run_id }}
+          path: target/backup-metadata.properties
+          retention-days: 30
+
+      - name: Deploy to ${{ matrix.profile }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+          LIQUIBASE_ACTION: ${{ inputs.action || 'update' }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+        run: |
+          ARGS="--action=${LIQUIBASE_ACTION}"
+          if [ "$LIQUIBASE_ACTION" = "rollback" ] && [ -n "$ROLLBACK_TAG" ]; then
+            ARGS="$ARGS --tag=$ROLLBACK_TAG"
+          fi
+          echo "🚀 Running: $ARGS on ${{ matrix.profile }}"
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            $ARGS
+
+      - name: Tag after deploy
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            --action=tag --tag=post-deploy-${{ needs.build.outputs.version }}
+          echo "✅ ${{ matrix.profile }} deploy complete"
+
+  # ────────────────────────────────────────────────────────────────
+  #  Job 3: Deploy to PRL1 (auto after DEV)
+  # ────────────────────────────────────────────────────────────────
+  deploy-prl1:
+    name: Deploy PRL1
+    runs-on: ubuntu-latest
+    needs: [build, deploy-dev]
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.target_profile == '' || inputs.target_profile == 'prl1'))
+    environment: prl1
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: liquidbase-bq-jar
+
+      - name: Authenticate to GCP (PRL1)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Tag before deploy
+        if: ${{ (inputs.action || 'update') == 'update' || (inputs.action || 'update') == 'rollback' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prl1 \
+            --action=tag --tag=pre-deploy-${{ needs.build.outputs.version }}
+
+      - name: Backup Dataset
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          echo "📸 Taking pre-deploy snapshot..."
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prl1 \
+            --action=backup
+
+      - name: Upload Backup Evidence
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-metadata-prl1-${{ github.run_id }}
+          path: target/backup-metadata.properties
+          retention-days: 30
+
+      - name: Deploy to PRL1
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+          LIQUIBASE_ACTION: ${{ inputs.action || 'update' }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+        run: |
+          ARGS="--action=${LIQUIBASE_ACTION}"
+          if [ "$LIQUIBASE_ACTION" = "rollback" ] && [ -n "$ROLLBACK_TAG" ]; then
+            ARGS="$ARGS --tag=$ROLLBACK_TAG"
+          fi
+          echo "🚀 Running: $ARGS on PRL1"
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prl1 \
+            $ARGS
+
+      - name: Tag after deploy
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prl1 \
+            --action=tag --tag=post-deploy-${{ needs.build.outputs.version }}
+          echo "✅ PRL1 deploy complete"
+
+  # ────────────────────────────────────────────────────────────────
+  #  Job 4: Deploy to UAT datasets (uat1, uat2) — manual approval
+  # ────────────────────────────────────────────────────────────────
+  deploy-uat:
+    name: Deploy UAT (${{ matrix.profile }}) ⏸
+    runs-on: ubuntu-latest
+    needs: [build, deploy-prl1]
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.target_profile == '' || inputs.target_profile == 'uat1' || inputs.target_profile == 'uat2'))
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [uat1, uat2]
+        exclude:
+          - profile: ${{ github.event_name == 'workflow_dispatch' && inputs.target_profile != '' && inputs.target_profile != 'uat1' && 'uat1' || 'NONE' }}
+          - profile: ${{ github.event_name == 'workflow_dispatch' && inputs.target_profile != '' && inputs.target_profile != 'uat2' && 'uat2' || 'NONE' }}
+    environment: uat
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: liquidbase-bq-jar
+
+      - name: Authenticate to GCP (UAT)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Tag before deploy
+        if: ${{ (inputs.action || 'update') == 'update' || (inputs.action || 'update') == 'rollback' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            --action=tag --tag=pre-deploy-${{ needs.build.outputs.version }}
+
+      - name: Backup Dataset
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          echo "📸 Taking pre-deploy snapshot..."
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            --action=backup
+
+      - name: Upload Backup Evidence
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-metadata-${{ matrix.profile }}-${{ github.run_id }}
+          path: target/backup-metadata.properties
+          retention-days: 30
+
+      - name: Deploy to ${{ matrix.profile }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+          LIQUIBASE_ACTION: ${{ inputs.action || 'update' }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+        run: |
+          ARGS="--action=${LIQUIBASE_ACTION}"
+          if [ "$LIQUIBASE_ACTION" = "rollback" ] && [ -n "$ROLLBACK_TAG" ]; then
+            ARGS="$ARGS --tag=$ROLLBACK_TAG"
+          fi
+          echo "🚀 Running: $ARGS on ${{ matrix.profile }}"
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            $ARGS
+
+      - name: Tag after deploy
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=${{ matrix.profile }} \
+            --action=tag --tag=post-deploy-${{ needs.build.outputs.version }}
+          echo "✅ ${{ matrix.profile }} deploy complete"
+
+  # ────────────────────────────────────────────────────────────────
+  #  Job 5: Deploy to PRD — manual approval
+  # ────────────────────────────────────────────────────────────────
+  deploy-prd:
+    name: Deploy PRD ⏸
+    runs-on: ubuntu-latest
+    needs: [build, deploy-uat]
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.target_profile == '' || inputs.target_profile == 'prd'))
+    environment: prd
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: liquidbase-bq-jar
+
+      - name: Authenticate to GCP (PRD)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Tag before deploy
+        if: ${{ (inputs.action || 'update') == 'update' || (inputs.action || 'update') == 'rollback' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prd \
+            --action=tag --tag=pre-deploy-${{ needs.build.outputs.version }}
+
+      - name: Backup Dataset
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          echo "📸 Taking pre-deploy snapshot..."
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prd \
+            --action=backup
+
+      - name: Upload Backup Evidence
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-metadata-prd-${{ github.run_id }}
+          path: target/backup-metadata.properties
+          retention-days: 30
+
+      - name: Deploy to PRD
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+          LIQUIBASE_ACTION: ${{ inputs.action || 'update' }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+        run: |
+          ARGS="--action=${LIQUIBASE_ACTION}"
+          if [ "$LIQUIBASE_ACTION" = "rollback" ] && [ -n "$ROLLBACK_TAG" ]; then
+            ARGS="$ARGS --tag=$ROLLBACK_TAG"
+          fi
+          echo "🚀 Running: $ARGS on PRD"
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prd \
+            $ARGS
+
+      - name: Tag after deploy
+        if: ${{ (inputs.action || 'update') == 'update' }}
+        env:
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
+        run: |
+          java -jar ${{ needs.build.outputs.jar_name }} \
+            --spring.profiles.active=prd \
+            --action=tag --tag=post-deploy-${{ needs.build.outputs.version }}
+          echo "✅ PRD deploy complete"
+
+  # ────────────────────────────────────────────────────────────────
+  #  Job 6: Finalize — Create git release tag after all deploys
+  # ────────────────────────────────────────────────────────────────
+  finalize:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    needs: [build, deploy-prd]
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.build.outputs.version }}" -m "Release ${{ needs.build.outputs.version }} — deployed to all environments"
+          git push origin "${{ needs.build.outputs.version }}"
+          echo "🏷️ Tagged: ${{ needs.build.outputs.version }}"

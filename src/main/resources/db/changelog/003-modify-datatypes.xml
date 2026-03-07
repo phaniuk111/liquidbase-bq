@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ================================================================
+         CHANGESET 1: Modify data type — orders.amount FLOAT64 → NUMERIC
+         Uses Liquibase's native modifyDataType (supported by BQ extension)
+         ================================================================ -->
+    <changeSet id="003-modify-orders-amount-type" author="schema-admin">
+        <comment>Change orders.amount from FLOAT64 to NUMERIC for precision</comment>
+        <modifyDataType tableName="orders"
+                        columnName="amount"
+                        newDataType="NUMERIC"/>
+    </changeSet>
+
+    <!-- ================================================================
+         CHANGESET 2: Modify data type — customers.email STRING → BYTES
+         Demonstrates another type change via modifyDataType.
+         NOTE: Not all type conversions are allowed by BigQuery. Valid
+         conversions include: INT64↔NUMERIC, FLOAT64↔NUMERIC, etc.
+         STRING→BYTES is for illustration; adjust to your real needs.
+         ================================================================ -->
+    <!--
+    <changeSet id="003-modify-customers-email-type" author="schema-admin">
+        <comment>Change customers.email from STRING to BYTES (example)</comment>
+        <modifyDataType tableName="customers"
+                        columnName="email"
+                        newDataType="BYTES"/>
+    </changeSet>
+    -->
+
+    <!-- ================================================================
+         CHANGESET 3: Modify data type using raw SQL
+         BigQuery supports ALTER TABLE ALTER COLUMN SET DATA TYPE for
+         certain compatible type changes.
+         ================================================================ -->
+    <changeSet id="003-modify-orders-discount-type" author="schema-admin">
+        <comment>Change orders.discount from FLOAT64 to NUMERIC via raw SQL</comment>
+        <sql>
+            ALTER TABLE orders
+            ALTER COLUMN discount SET DATA TYPE NUMERIC
+        </sql>
+    </changeSet>
+
+    <!-- ================================================================
+         CHANGESET 4: Widen STRING column to BYTES using raw SQL
+         Shows how to use ALTER COLUMN SET DATA TYPE for type widening.
+         ================================================================ -->
+    <changeSet id="003-modify-products-price-type" author="schema-admin">
+        <comment>Change products.price from NUMERIC to BIGNUMERIC for larger values</comment>
+        <sql>
+            ALTER TABLE products
+            ALTER COLUMN price SET DATA TYPE BIGNUMERIC
+        </sql>
+    </changeSet>
+
+    <!-- Tag after datatype modifications -->
+    <changeSet id="003-tag-datatypes-modified" author="schema-admin">
+        <tagDatabase tag="datatypes-modified-v3"/>
+    </changeSet>
+
+</databaseChangeLog>

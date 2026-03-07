@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- 1. Tag only (fails due to missing context/labels) -->
+    <changeSet id="tag-only" author="test">
+        <tagDatabase tag="v1.0.0"/>
+    </changeSet>
+
+    <!-- 2. Missing rollback -->
+    <changeSet id="missing-rollback" author="test" context="dev" labels="test">
+        <sql>CREATE TABLE test_table (id INT)</sql>
+    </changeSet>
+
+    <!-- 3. Missing context -->
+    <changeSet id="missing-context" author="test" labels="test">
+        <sql>CREATE TABLE test_table (id INT)</sql>
+        <rollback><sql>DROP TABLE test_table</sql></rollback>
+    </changeSet>
+
+    <!-- 4. Missing labels -->
+    <changeSet id="missing-labels" author="test" context="dev">
+        <sql>CREATE TABLE test_table (id INT)</sql>
+        <rollback><sql>DROP TABLE test_table</sql></rollback>
+    </changeSet>
+
+    <!-- 5. Destructive without preconditions (RAW SQL) -->
+    <changeSet id="destructive-raw" author="test" context="dev" labels="test">
+        <sql>DROP TABLE test_table</sql>
+        <rollback><sql>CREATE TABLE test_table (id INT)</sql></rollback>
+    </changeSet>
+
+    <!-- 6. Unreadable SQL file -->
+    <changeSet id="unreadable-sql" author="test" context="dev" labels="test">
+        <sqlFile path="db/changelog/validation/non-existent.sql" splitStatements="true" stripComments="true"/>
+        <rollback><sql>CREATE TABLE test_table (id INT)</sql></rollback>
+    </changeSet>
+
+    <!-- 7. Destructive sqlFile without preconditions -->
+    <changeSet id="destructive-sqlfile" author="test" context="dev" labels="test">
+        <sqlFile path="db/changelog/validation/destructive.sql" splitStatements="true" stripComments="true"/>
+        <rollback><sql>CREATE TABLE test_table (id INT)</sql></rollback>
+    </changeSet>
+
+</databaseChangeLog>

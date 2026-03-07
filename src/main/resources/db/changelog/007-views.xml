@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ================================================================
+         CHANGESET 1: Create "active_customers_view"
+         Uses Liquibase native createView (supported by BQ extension).
+         ================================================================ -->
+    <changeSet id="007-create-active-customers-view" author="schema-admin">
+        <comment>View showing only active customers</comment>
+        <createView viewName="active_customers_view"
+                    replaceIfExists="true">
+            SELECT
+                customer_id,
+                first_name,
+                last_name,
+                email,
+                loyalty_tier,
+                total_spent,
+                created_at
+            FROM customers
+            WHERE active_flag = TRUE
+        </createView>
+    </changeSet>
+
+    <!-- ================================================================
+         CHANGESET 2: Create "order_summary_view"
+         ================================================================ -->
+    <changeSet id="007-create-order-summary-view" author="schema-admin">
+        <comment>Aggregated order summary by customer</comment>
+        <createView viewName="order_summary_view"
+                    replaceIfExists="true">
+            SELECT
+                c.customer_id,
+                c.first_name,
+                c.last_name,
+                COUNT(o.order_id)     AS total_orders,
+                SUM(o.amount)         AS total_amount,
+                MAX(o.order_date)     AS last_order_date
+            FROM customers c
+            LEFT JOIN orders o ON c.customer_id = o.customer_id
+            GROUP BY c.customer_id, c.first_name, c.last_name
+        </createView>
+    </changeSet>
+
+    <!-- ================================================================
+         CHANGESET 3: Create "event_locations_view" — flattens nested STRUCT
+         Uses raw SQL for BigQuery-specific UNNEST / struct access.
+         ================================================================ -->
+    <changeSet id="007-create-event-locations-view" author="schema-admin">
+        <comment>View that flattens the nested location STRUCT from events</comment>
+        <sql>
+            CREATE OR REPLACE VIEW event_locations_view AS
+            SELECT
+                event_id,
+                event_type,
+                user_id,
+                event_time,
+                location.city     AS city,
+                location.country  AS country,
+                location.zip_code AS zip_code
+            FROM events
+        </sql>
+    </changeSet>
+
+    <!-- ================================================================
+         CHANGESET 4: Create "event_metadata_view" — unnests ARRAY<STRUCT>
+         ================================================================ -->
+    <changeSet id="007-create-event-metadata-view" author="schema-admin">
+        <comment>View that unnests the metadata ARRAY of STRUCT from events</comment>
+        <sql>
+            CREATE OR REPLACE VIEW event_metadata_view AS
+            SELECT
+                e.event_id,
+                e.event_type,
+                e.user_id,
+                m.key   AS metadata_key,
+                m.value AS metadata_value
+            FROM events e,
+            UNNEST(e.metadata) AS m
+        </sql>
+    </changeSet>
+
+    <!-- ================================================================
+         CHANGESET 5: Create "user_addresses_view" — unnests ARRAY<STRUCT>
+         ================================================================ -->
+    <changeSet id="007-create-user-addresses-view" author="schema-admin">
+        <comment>View that flattens user_profiles.addresses ARRAY of STRUCT</comment>
+        <sql>
+            CREATE OR REPLACE VIEW user_addresses_view AS
+            SELECT
+                u.user_id,
+                u.username,
+                addr.address_type,
+                addr.street,
+                addr.apartment,
+                addr.city,
+                addr.state,
+                addr.zip_code,
+                addr.country,
+                addr.is_primary
+            FROM user_profiles u,
+            UNNEST(u.addresses) AS addr
+        </sql>
+    </changeSet>
+
+    <!-- ================================================================
+         CHANGESET 6: Drop a view (example — uncomment to use)
+         ================================================================ -->
+    <!--
+    <changeSet id="007-drop-event-locations-view" author="schema-admin">
+        <comment>Drop event_locations_view</comment>
+        <dropView viewName="event_locations_view"/>
+    </changeSet>
+    -->
+
+    <!-- Tag after views -->
+    <changeSet id="007-tag-views-created" author="schema-admin">
+        <tagDatabase tag="views-created-v7"/>
+    </changeSet>
+
+</databaseChangeLog>
