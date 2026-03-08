@@ -147,6 +147,22 @@
                 </executions>
             </plugin>
 
+            <!-- Surefire Report Plugin to generate XML/HTML for CI/CD passing/failing -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-report-plugin</artifactId>
+                <version>3.1.2</version>
+                <executions>
+                    <execution>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report-only</goal>
+                            <goal>failsafe-report-only</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Maven Enforcer Plugin for Strict JDK 17 Policy -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

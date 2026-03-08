@@ -56,6 +56,15 @@ jobs:
       run: |
         ./mvnw -B verify -Pci-integration -Dskip.surefire.tests=true
 
+    - name: Publish Test Report to Job Summary
+      uses: dorny/test-reporter@v1
+      if: always()
+      with:
+        name: Integration Test Scenarios
+        path: target/failsafe-reports/TEST-*.xml
+        reporter: java-junit
+        fail-on-error: false
+
     - name: Always Cleanup Sandbox Dataset
       # This step MUST run regardless of whether the tests passed or failed!
       if: always()
