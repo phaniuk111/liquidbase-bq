@@ -5,7 +5,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.jdbc.core.JdbcTemplate;
-import com.example.liquidbasebq.service.BigQueryBackupService;
 import com.example.liquidbasebq.service.BigQuerySchemaService;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -21,9 +20,6 @@ class BigQueryDataLossRecoveryIT {
 
     @Autowired
     private BigQuerySchemaService schemaService;
-
-    @Autowired
-    private BigQueryBackupService backupService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;

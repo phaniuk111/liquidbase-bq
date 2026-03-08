@@ -57,6 +57,7 @@ jobs:
       - name: Validate changelog XML
         run: |
           echo "Validating Liquibase changelog structure..."
+          sudo apt-get update && sudo apt-get install -y libxml2-utils
           for f in src/main/resources/db/changelog/*.xml; do
             echo "  ✓ Validating: $f"
             xmllint --noout "$f" 2>&1 || exit 1
