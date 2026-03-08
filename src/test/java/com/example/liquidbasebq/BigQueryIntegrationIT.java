@@ -21,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @SpringBootTest(properties = {
         "spring.main.web-application-type=none",
-        "spring.profiles.active=ci-integration"
+        "spring.profiles.active=ci-integration",
+        "spring.autoconfigure.exclude=" // Overrides test/resources/application.properties
 })
 @ActiveProfiles("ci-integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)

@@ -11,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {
         "spring.main.web-application-type=none",
-        "spring.profiles.active=ci-dataloss"
+        "spring.profiles.active=ci-dataloss",
+        "spring.autoconfigure.exclude=" // Overrides test/resources/application.properties
 })
 @ActiveProfiles("ci-dataloss")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -29,34 +30,45 @@ class BigQueryDataLossRecoveryIT {
     @DisplayName("Should successfully establish legacy tables with fake pre-existing data using manual JDBC")
     void testEstablishLegacyData() {
         // Drop them if they somehow exist from a dirty previous run
-        jdbcTemplate.execute("DROP TABLE IF EXISTS legacy_users_drop");
+        jdbcTemplate.execute("DROP TABLE IF EXISTS legacy_users_delete");
         jdbcTemplate.execute("DROP TABLE IF EXISTS legacy_users_trunc");
-        jdbcTemplate.execute("DROP TABLE IF EXISTS legacy_users_trunc_snapshot");
+        jdbcTemplate.execute("DROP SNAPSHOT TABLE IF EXISTS legacy_users_delete_snapshot");
+        jdbcTemplate.execute("DROP SNAPSHOT TABLE IF EXISTS legacy_users_trunc_snapshot");
+
+        // CLEANUP: Ensure Liquibase forgets we ran these tests so it re-executes them
+        // every time
+        try {
+            jdbcTemplate.execute(
+                    "DELETE FROM DATABASECHANGELOG WHERE ID IN ('destroy-delete-table', 'destroy-truncate-table')");
+        } catch (Exception e) {
+            System.out.println("Note: DATABASECHANGELOG may not exist yet, skipping cleanup.");
+        }
 
         // Create the tables directly via JDBC (bypassing Liquibase completely)
-        jdbcTemplate.execute("CREATE TABLE legacy_users_drop (id INT64, name STRING)");
+        jdbcTemplate.execute("CREATE TABLE legacy_users_delete (id INT64, name STRING)");
         jdbcTemplate.execute("CREATE TABLE legacy_users_trunc (id INT64, name STRING)");
 
         // Insert exactly 10 rows into both tables manually
         for (int i = 1; i <= 10; i++) {
             jdbcTemplate
-                    .execute("INSERT INTO legacy_users_drop (id, name) VALUES (" + i + ", 'Legacy User " + i + "')");
+                    .execute("INSERT INTO legacy_users_delete (id, name) VALUES (" + i + ", 'Legacy User " + i + "')");
             jdbcTemplate
                     .execute("INSERT INTO legacy_users_trunc (id, name) VALUES (" + i + ", 'Legacy User " + i + "')");
         }
 
         // Verify the data was inserted successfully
-        Integer countDrop = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_drop", Integer.class);
+        Integer countDelete = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_delete", Integer.class);
         Integer countTrunc = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_trunc", Integer.class);
-        assertEquals(10, countDrop);
+        assertEquals(10, countDelete);
         assertEquals(10, countTrunc);
     }
 
     @Test
     @Order(2)
-    @DisplayName("Should explicitly generate a manual snapshot of the truncate table before destruction")
-    void testExplicitSnapshot() {
+    @DisplayName("Should explicitly generate manual snapshots of both tables before destruction")
+    void testExplicitSnapshots() {
         assertDoesNotThrow(() -> {
+            jdbcTemplate.execute("CREATE SNAPSHOT TABLE legacy_users_delete_snapshot CLONE legacy_users_delete");
             jdbcTemplate.execute("CREATE SNAPSHOT TABLE legacy_users_trunc_snapshot CLONE legacy_users_trunc");
         });
     }
@@ -74,22 +86,17 @@ class BigQueryDataLossRecoveryIT {
     @Test
     @Order(4)
     @DisplayName("Should successfully delete and truncate data via Liquibase execution")
-    void testExecuteDestructiveChangelog() throws InterruptedException {
-        // Pausing extremely briefly to guarantee our TIMESTAMP_SUB clock arithmetic
-        // inside
-        // the rollback SQL doesn't pull a microsecond from before the table existed!
-        Thread.sleep(5000);
+    void testExecuteDestructiveChangelog() {
+        System.out.println("Starting destructive Liquibase update (no sleep required for snapshots)...");
 
-        // Apply our `dataloss-changelog.xml` which contains the DROP and TRUNCATE
+        // Apply our `dataloss-changelog.xml` which contains the DELETE and TRUNCATE
         assertDoesNotThrow(() -> {
             schemaService.updateSchema();
         });
 
-        // 1. Verify DROP table throws a SQL exception because it's completely gone
-        Exception dropException = assertThrows(org.springframework.jdbc.BadSqlGrammarException.class, () -> {
-            jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_drop", Integer.class);
-        });
-        assertTrue(dropException.getMessage().contains("Not found: Table"));
+        // 1. Verify DELETE table has exactly ZERO rows
+        Integer countDelete = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_delete", Integer.class);
+        assertEquals(0, countDelete);
 
         // 2. Verify TRUNCATE table exists, but has exactly ZERO rows
         Integer countTruncate = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_trunc", Integer.class);
@@ -98,23 +105,27 @@ class BigQueryDataLossRecoveryIT {
 
     @Test
     @Order(5)
-    @DisplayName("Should perfectly restore BOTH tables and ALL 10 original rows via Time Travel and Snapshots")
+    @DisplayName("Should perfectly restore BOTH tables and ALL 10 original rows via Snapshots")
     void testRollbackAndRestore() {
-        // Execute the Time Travel and Snapshot restoration SQL defined in the
+        // Execute the Snapshot restoration SQL defined in the
         // `<rollback>` blocks
         assertDoesNotThrow(() -> {
             schemaService.rollbackToTag("pre-destruction");
         });
 
         // Both tables should exist without throwing an error
-        Integer restoredDropCount = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_drop",
+        System.out.println("Verifying recovery state...");
+        Integer restoredDeleteCount = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_delete",
                 Integer.class);
         Integer restoredTruncCount = jdbcTemplate.queryForObject("SELECT count(*) FROM legacy_users_trunc",
                 Integer.class);
 
+        System.out.println("Recovered Delete Count: " + restoredDeleteCount);
+        System.out.println("Recovered Trunc Count: " + restoredTruncCount);
+
         // BOTH tables must contain exactly 10 rows, definitively proving our Data Loss
         // Recovery strategy works!
-        assertEquals(10, restoredDropCount, "Time Travel Rollback failed to restore the dropped 10 rows!");
-        assertEquals(10, restoredTruncCount, "Snapshot Rollback failed to restore the truncated 10 rows!");
+        assertEquals(10, restoredDeleteCount, "Snapshot rollback failed to restore deleted data!");
+        assertEquals(10, restoredTruncCount, "Snapshot rollback failed to restore truncated data!");
     }
 }

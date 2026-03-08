@@ -101,19 +101,6 @@ class BigQueryBackupServiceTest {
     }
 
     @Nested
-    @DisplayName("Time Travel SQL")
-    class TimeTravelTests {
-
-        @Test
-        @DisplayName("should sanitize table name and generate SQL")
-        void shouldGenerateTimeTravelSql() {
-            String sql = service.generateTimeTravelSql("malicious; DROP TABLE users;", "2023-10-24 10:00:00");
-            assertTrue(sql.contains("malicious__DROP_TABLE_users_"));
-            assertFalse(sql.contains("malicious; DROP"));
-        }
-    }
-
-    @Nested
     @DisplayName("GCS Export")
     class GcsExportTests {
 
