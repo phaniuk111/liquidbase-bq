@@ -1,0 +1,54 @@
+name: Tier 2 Integration Tests (Real Cloud)
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  # Using the GCP project configured for DEV
+  BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+  # Generate a unique dataset name based on the PR number or Run ID to prevent collisions
+  BQ_DATASET_ID: ci_integration_${{ github.run_id }}_${{ github.run_attempt }}
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Authenticate to Google Cloud
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+        service_account: ${{ secrets.SA_EMAIL }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Ensure Temporary Sandbox Dataset Exists
+      run: |
+        echo "Creating sandbox dataset: ${{ env.BQ_PROJECT_ID }}:${{ env.BQ_DATASET_ID }}"
+        # Create dataset in the specified project. Fails silently if it already exists.
+        bq mk --dataset --location=US ${{ env.BQ_PROJECT_ID }}:${{ env.BQ_DATASET_ID }} || true
+
+    - name: Run Integration Tests (Failsafe)
+      # We skip Surefire unit tests here since they run in feature.yaml, and only run the Failsafe *IT tests
+      run: |
+        ./mvnw -B verify -Pci-integration -Dskip.surefire.tests=true
+
+    - name: Always Cleanup Sandbox Dataset
+      # This step MUST run regardless of whether the tests passed or failed!
+      if: always()
+      run: |
+        echo "Tearing down sandbox dataset: ${{ env.BQ_PROJECT_ID }}:${{ env.BQ_DATASET_ID }}"
+        bq rm -r -f --dataset ${{ env.BQ_PROJECT_ID }}:${{ env.BQ_DATASET_ID }}

@@ -112,6 +112,20 @@
                 </configuration>
             </plugin>
 
+            <!-- Maven Failsafe for Integration Tests (*IT.java) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Jacoco for Test Coverage -->
             <plugin>
                 <groupId>org.jacoco</groupId>
@@ -179,4 +193,13 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>ci-integration</id>
+            <properties>
+                <spring.profiles.active>ci-integration</spring.profiles.active>
+            </properties>
+        </profile>
+    </profiles>
 </project>
