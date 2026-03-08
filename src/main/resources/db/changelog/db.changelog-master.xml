@@ -21,8 +21,8 @@
       Do NOT use Liquibase-native tags (<createTable>, <addColumn>, etc.)
       
       To create a new migration:
-      1. Run the scaffold tool (make sure to include --register-master):
-         `./mvnw exec:java@scaffold -Dscript.name="your-change-name" -Ddomain="your_domain" -Dcontexts="dev,uat,prd" -Dlabels="feature-123" --register-master`
+      1. Run the scaffold tool (make sure to include master registration):
+         `./mvnw exec:java@scaffold -Dscript.name="your-change-name" -Ddomain="your_domain" -Dcontexts="dev,uat,prd" -Dlabels="feature-123"`
       2. This will automatically generate the SQL and XML files, and 
          register the new XML wrapper in this file automatically.
       3. Write your standard BigQuery SQL in the generated `.sql` files.
