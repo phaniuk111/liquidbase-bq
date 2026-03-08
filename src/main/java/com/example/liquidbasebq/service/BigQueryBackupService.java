@@ -146,6 +146,9 @@ public class BigQueryBackupService {
     /**
      * Restore multiple tables from their snapshots.
      * <p>
+     * <b>Administrative Action:</b> This is intended for emergency data recovery
+     * via the CLI and should not be hardcoded into Liquibase changelogs.
+     * <p>
      * <b>WARNING (Non-Atomic Operation):</b> BigQuery does not support multi-table
      * transactions. If a restore operation fails mid-way (e.g., table 5 of 10
      * fails),

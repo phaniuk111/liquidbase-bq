@@ -320,6 +320,25 @@ java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
 
 ---
 
+## 🛡️ Rollback & Data Recovery Policy
+
+This project distinguishes between **structural changes** and **proactive data protection**.
+
+### 1. Routine Rollbacks (Developer Task)
+For non-destructive changes (e.g., `addColumn`, `renameColumn`, `createView`), you **must** provide a standard Liquibase `<rollback>` block with the inverse SQL. This allows for safe local development and PR testing.
+- **Example**: If you add a column, the rollback should be `ALTER TABLE ... DROP COLUMN`.
+
+### 2. Proactive Guardrails & Emergency Recovery
+We have multi-layered protection for both obvious and "silent" data loss (e.g., data type changes):
+- **PR Risk Detection**: Every Pull Request dry-runs SQL against a DEV environment. Our CI (`feature.yaml`) automatically flags risky operations like `DROP`, `TRUNCATE`, and `SET DATA TYPE` with warnings in PR comments.
+- **Automated Snapshots**: Our deployment pipeline (`main.yaml`) is configured to run `--action=backup` **immediately before every deployment** to any environment. This ensures a guaranteed point-in-time recovery option exists for every version of your database.
+- **Emergency Restoration**: For catastrophic data loss, do **not** attempt to hardcode restoration in your changelog. Instead, use the `restore` CLI action to pull from the specific snapshot taken during that deployment:
+```bash
+java -jar app.jar --action=restore --tag=pre-deploy-v1.2.3
+```
+
+---
+
 ## CI/CD — GitHub Actions
 
 ### Trunk-Based Deployment Flow
