@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.33.xsd">
+
+    <!-- Scenario A: Time Travel Drop Recovery -->
+    <changeSet id="destroy-drop-table" author="integration-test">
+        <comment>Catastrophic DROP of a table with legacy data</comment>
+        <sql>
+            DROP TABLE legacy_users_drop;
+        </sql>
+        <rollback>
+            <!-- 
+               Time Travel Rollback: 
+               We dynamically subtract 1 minute because the integration test runner executes 
+               this immediately after the table is created via JDBC.
+            -->
+            <sql>
+                CREATE OR REPLACE TABLE legacy_users_drop AS
+                SELECT * FROM legacy_users_drop 
+                FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 MINUTE);
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <!-- Scenario B: Explicit Snapshot Truncate Recovery -->
+    <changeSet id="destroy-truncate-table" author="integration-test">
+        <comment>Catastrophic TRUNCATE of a table with legacy data</comment>
+        <sql>
+            TRUNCATE TABLE legacy_users_trunc;
+        </sql>
+        <rollback>
+            <!-- 
+               Explicit Snapshot Rollback: 
+               The integration test runs java to create `legacy_users_trunc_snapshot` 
+               BEFORE running Liquibase. This pulls the data back out of the snapshot.
+            -->
+            <sql>
+                INSERT INTO legacy_users_trunc
+                SELECT * FROM legacy_users_trunc_snapshot;
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
