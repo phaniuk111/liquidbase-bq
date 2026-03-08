@@ -28,6 +28,10 @@ jobs:
   build-test-validate:
     name: Build, Test & Validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout code
