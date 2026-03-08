@@ -88,28 +88,51 @@ export SPRING_PROFILES_ACTIVE=uat1
 
 ---
 
-## 5-Minute Quickstart (Maven Wrapper)
-All commands in this repository are executed using the Maven Wrapper (`./mvnw`), which ensures you have the exact required version of Maven without needing it installed globally.
+## 🛑 PR Prerequisite: Developer Workflow
+
+Before raising a Pull Request, **you must scaffold your migration and write your SQL**. You should NEVER create the `.xml` changelog wrappers manually.
+
+1. **Scaffold the Migration (Required):**
+   Use the `ChangeScaffoldCli` tool to auto-generate the required SQL files and XML wrapper in the correct directories, and automatically register it in the master changelog.
+2. **Write the SQL:**
+   Open the generated SQL files in `src/main/resources/db/changelog/sql/ddl/` and `rollback/`, and write your raw BigQuery SQL.
+
+If your PR contains manually created XML files or is missing the generated SQL files, **the CI pipeline will fail the strict validation rules.**
+
+---
+
+## 5-Minute Quickstart (Using Executable JAR)
+While you can use `./mvnw spring-boot:run`, compiling the application into an executable JAR is often faster and closer to how CI/CD pipelines run the tool.
+
+### 0. Build the JAR
+First, package the application (skipping tests for speed):
+```bash
+./mvnw clean package -DskipTests
+```
 
 ### 1. Scaffold a New Migration
-Run the CLI tool to auto-generate the DDL, Rollback SQL, and XML Wrapper files:
+Run the CLI tool natively using Java 11+ source-file execution to auto-generate the DDL, Rollback SQL, and XML Wrapper files:
 ```bash
-./mvnw -q -DskipTests exec:java -Dexec.mainClass=com.example.liquidbasebq.tools.ChangeScaffoldCli \
-  -Dexec.args="--name add-payment-table --domain orders --contexts dev,uat,prd --labels feature-123 --author email@example.com --register-master"
+java src/main/java/com/example/liquidbasebq/tools/ChangeScaffoldCli.java \
+  --name add-payment-table --domain orders --contexts dev,uat,prd --labels feature-123 --author email@example.com --register-master
 ```
 *This command outputs the exact file paths it created so you can start editing immediately.*
 
 ### 2. Validate Locally
-Once you have written your SQL in the generated files, run the strict structural validation:
+Once you have written your SQL in the generated files, run the strict structural validation using the JAR:
 ```bash
-./mvnw -q -DskipTests spring-boot:run -Dspring-boot.run.arguments="--action=validate-strict"
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
+  --spring.profiles.active=dev1 \
+  --action=validate-strict
 ```
 *If your changeset is missing a rollback block or preconditions, this will provide you the exact snippet to copy-paste to fix it.*
 
 ### 3. Preview SQL Deployment
 Dry-run the generated SQL against a specific environment profile (e.g. `dev1`):
 ```bash
-./mvnw -q -DskipTests spring-boot:run -Dspring-boot.run.profiles=dev1 -Dspring-boot.run.arguments="--action=update-sql"
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
+  --spring.profiles.active=dev1 \
+  --action=update-sql
 ```
 
 ---
@@ -222,44 +245,41 @@ Liquibase auto-creates two tables on the first `update` run:
 | `--action=rollback-count --count=N` | Rollback last N changesets |
 
 ```bash
-./mvnw -q -DskipTests spring-boot:run -Dspring-boot.run.profiles=prd -Dspring-boot.run.arguments="--action=backup"                 # Snapshot backup
-./mvnw -q -DskipTests spring-boot:run -Dspring-boot.run.profiles=prd -Dspring-boot.run.arguments="--action=export-gcs --tag=v3"     # GCS long-term backup
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=prd --action=backup                 # Snapshot backup
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=prd --action=export-gcs --tag=v3    # GCS long-term backup
 ```
 
-### Windows (Git Bash / CMD / PowerShell)
+### Running on any OS (Git Bash / CMD / Linux)
 
-On Windows, use `mvnw` instead of `./mvnw`:
+Since the application is packaged as a JAR, all commands work identically across any OS:
 
-```cmd
-:: Run unit tests
-mvnw test -B
+```bash
+# Check status (dev1)
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=dev1 --action=status
 
-:: Check status (dev1)
-mvnw spring-boot:run -Dspring-boot.run.profiles=dev1 -Dspring-boot.run.arguments="--action=status"
+# Apply changes (uat1)
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=uat1 --action=update
 
-:: Apply changes (uat1)
-mvnw spring-boot:run -Dspring-boot.run.profiles=uat1 -Dspring-boot.run.arguments="--action=update"
+# Preview SQL (prd)
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=prd --action=update-sql
 
-:: Preview SQL (prd)
-mvnw spring-boot:run -Dspring-boot.run.profiles=prd -Dspring-boot.run.arguments="--action=update-sql"
+# Validate changelog XML
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=dev1 --action=validate
 
-:: Validate changelog XML
-mvnw spring-boot:run -Dspring-boot.run.arguments="--action=validate"
+# Snapshot backup (prd)
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=prd --action=backup
 
-:: Snapshot backup (prd)
-mvnw spring-boot:run -Dspring-boot.run.profiles=prd -Dspring-boot.run.arguments="--action=backup"
+# Rollback to tag (uat1)
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=uat1 --action=rollback --tag=baseline-v1
 
-:: Rollback to tag (uat1)
-mvnw spring-boot:run -Dspring-boot.run.profiles=uat1 -Dspring-boot.run.arguments="--action=rollback --tag=baseline-v1"
+# Deployment history
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=dev1 --action=history
 
-:: Deployment history
-mvnw spring-boot:run -Dspring-boot.run.profiles=dev1 -Dspring-boot.run.arguments="--action=history"
-
-:: GCS export (long-term backup)
-mvnw spring-boot:run -Dspring-boot.run.profiles=prd -Dspring-boot.run.arguments="--action=export-gcs --tag=pre_v3 --format=PARQUET"
+# GCS export (long-term backup)
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=prd --action=export-gcs --tag=pre_v3 --format=PARQUET
 ```
 
-> **Note**: All commands work identically across Windows, Mac, and Linux.
+> **Note**: Just ensure you have run `./mvnw clean package -DskipTests` to build the JAR first.
 
 ---
 
@@ -283,16 +303,19 @@ CI/CD also creates `pre-deploy-{version}` and `post-deploy-{version}` tags on ea
 
 ```bash
 # Rollback UAT1 to baseline
-./mvnw spring-boot:run -Dspring-boot.run.profiles=uat1 \
-    -Dspring-boot.run.arguments="--action=rollback --tag=baseline-v1"
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
+  --spring.profiles.active=uat1 \
+  --action=rollback --tag=baseline-v1
 
 # Preview rollback SQL on dev2
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev2 \
-    -Dspring-boot.run.arguments="--action=rollback-sql --tag=columns-added-v2"
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
+  --spring.profiles.active=dev2 \
+  --action=rollback-sql --tag=columns-added-v2
 
 # Rollback last 3 changesets on uat2
-./mvnw spring-boot:run -Dspring-boot.run.profiles=uat2 \
-    -Dspring-boot.run.arguments="--action=rollback-count --count=3"
+java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
+  --spring.profiles.active=uat2 \
+  --action=rollback-count --count=3
 ```
 
 ---

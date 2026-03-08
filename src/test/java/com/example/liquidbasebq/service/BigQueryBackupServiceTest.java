@@ -150,5 +150,114 @@ class BigQueryBackupServiceTest {
             assertNotNull(suffix);
             assertTrue(suffix.startsWith("dev1_"));
         }
+
+        @Test
+        @DisplayName("should restore from snapshots successfully")
+        void shouldRestoreFromSnapshots() throws Exception {
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.createStatement()).thenReturn(statement);
+            when(statement.executeQuery(anyString())).thenReturn(resultSet);
+            // Simulate 2 tables to restore
+            when(resultSet.next()).thenReturn(true, true, false);
+            when(resultSet.getString("table_name")).thenReturn("users", "orders");
+
+            assertDoesNotThrow(() -> service.restoreFromSnapshots("v1"));
+            verify(statement, times(2)).execute(contains("CREATE OR REPLACE TABLE"));
+        }
+
+        @Test
+        @DisplayName("restoreFromSnapshots fails if snapshot dataset is empty")
+        void restoreFromSnapshotsEmpty() throws Exception {
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.createStatement()).thenReturn(statement);
+            when(statement.executeQuery(anyString())).thenReturn(resultSet);
+            when(resultSet.next()).thenReturn(false);
+
+            RuntimeException e = assertThrows(RuntimeException.class, () -> service.restoreFromSnapshots("v1"));
+            assertTrue(e.getMessage().contains("No tables found in snapshot dataset"));
+        }
+
+        @Test
+        @DisplayName("should restore single table from snapshot")
+        void shouldRestoreTableFromSnapshot() throws Exception {
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.createStatement()).thenReturn(statement);
+            when(statement.executeQuery(anyString())).thenReturn(resultSet);
+            // Simulate 2 tables in the snapshot
+            when(resultSet.next()).thenReturn(true, true, false);
+            when(resultSet.getString("table_name")).thenReturn("users", "orders");
+
+            assertDoesNotThrow(() -> service.restoreTableFromSnapshot("v1", "orders"));
+            verify(statement, times(1)).execute(contains("CREATE OR REPLACE TABLE `test-project.test_dataset.orders`"));
+        }
+
+        @Test
+        @DisplayName("restoreTableFromSnapshot fails if table not in snapshot")
+        void restoreTableFromSnapshotMissingTable() throws Exception {
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.createStatement()).thenReturn(statement);
+            when(statement.executeQuery(anyString())).thenReturn(resultSet);
+            when(resultSet.next()).thenReturn(true, false);
+            when(resultSet.getString("table_name")).thenReturn("users");
+
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> service.restoreTableFromSnapshot("v1", "orders"));
+            assertTrue(e.getMessage().contains("not found in snapshot dataset"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Dataset Copy")
+    class DatasetCopyTests {
+
+        @Test
+        @DisplayName("should copy dataset successfully")
+        void shouldCopyDataset() throws Exception {
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.createStatement()).thenReturn(statement);
+            when(statement.executeQuery(anyString())).thenReturn(resultSet);
+            // Simulate 1 table to copy
+            when(resultSet.next()).thenReturn(true, false);
+            when(resultSet.getString("table_name")).thenReturn("users");
+
+            var executedSql = service.createDatasetCopy("v1");
+            assertEquals(2, executedSql.size()); // CREATE SCHEMA + CREATE TABLE AS SELECT
+            verify(statement, times(2)).execute(anyString());
+        }
+
+        @Test
+        @DisplayName("copy dataset generates correctly but does nothing if empty")
+        void shouldCopyDatasetEmpty() throws Exception {
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.createStatement()).thenReturn(statement);
+            when(statement.executeQuery(anyString())).thenReturn(resultSet);
+            // Simulate 0 tables
+            when(resultSet.next()).thenReturn(false);
+
+            var executedSql = service.createDatasetCopy("v1");
+            assertEquals(1, executedSql.size()); // Just CREATE SCHEMA
+            verify(statement, times(1)).execute(contains("CREATE SCHEMA"));
+        }
+    }
+
+    @Nested
+    @DisplayName("GCS Restore Script Generation")
+    class GcsRestoreScriptTests {
+
+        @Test
+        @DisplayName("should generate bq load script")
+        void shouldGenerateRestoreScript() throws Exception {
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.createStatement()).thenReturn(statement);
+            when(statement.executeQuery(anyString())).thenReturn(resultSet);
+            when(resultSet.next()).thenReturn(true, false);
+            when(resultSet.getString("table_name")).thenReturn("users");
+
+            String script = service.generateGcsRestoreScript("gs://bucket/path", "PARQUET");
+            assertTrue(script.contains("#!/bin/bash"));
+            assertTrue(script.contains("bq load --source_format=PARQUET"));
+            assertTrue(script.contains("test-project.test_dataset.users"));
+            assertTrue(script.contains("gs://bucket/path/users/*"));
+        }
     }
 }

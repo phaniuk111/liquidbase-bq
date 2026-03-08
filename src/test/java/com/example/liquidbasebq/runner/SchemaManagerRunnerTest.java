@@ -13,6 +13,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 
 /**
@@ -39,7 +40,7 @@ class SchemaManagerRunnerTest {
 
     @BeforeEach
     void setUp() {
-        when(environment.getActiveProfiles()).thenReturn(new String[] { "dev1" });
+        lenient().when(environment.getActiveProfiles()).thenReturn(new String[] { "dev1" });
         runner = new SchemaManagerRunner(schemaService, backupService, validationConfig, environment);
     }
 
@@ -70,6 +71,13 @@ class SchemaManagerRunnerTest {
         when(schemaService.generateUpdateSql()).thenReturn("CREATE TABLE test;");
         runner.run("--action=update-sql");
         verify(schemaService).generateUpdateSql();
+    }
+
+    @Test
+    @DisplayName("--action=validate-strict should call validateStrict()")
+    void validateStrictAction() throws Exception {
+        runner.run("--action=validate-strict");
+        verify(validationConfig).validateStrict();
     }
 
     @Test
@@ -112,6 +120,22 @@ class SchemaManagerRunnerTest {
     void rollbackCountDefaultsToOne() throws Exception {
         runner.run("--action=rollback-count");
         verify(schemaService).rollbackByCount(1);
+    }
+
+    @Test
+    @DisplayName("--count with invalid format should throw IllegalArgumentException")
+    void rollbackCountInvalidFormatShouldThrow() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> runner.run("--action=rollback-count", "--count=abc"));
+        assertTrue(e.getMessage().contains("Invalid value for --count"));
+    }
+
+    @Test
+    @DisplayName("--count with zero or negative should throw IllegalArgumentException")
+    void rollbackCountNegativeShouldThrow() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> runner.run("--action=rollback-count", "--count=-1"));
+        assertTrue(e.getMessage().contains("must be greater than 0"));
     }
 
     @Test
@@ -210,5 +234,53 @@ class SchemaManagerRunnerTest {
     void restoreTableAction() throws Exception {
         runner.run("--action=restore-table", "--tag=dev1_20260306_120000", "--table=payment_methods");
         verify(backupService).restoreTableFromSnapshot("dev1_20260306_120000", "payment_methods");
+    }
+
+    @Test
+    @DisplayName("--action=restore-table missing arguments throws exception")
+    void restoreTableMissingArgsShouldThrow() {
+        assertThrows(IllegalArgumentException.class, () -> runner.run("--action=restore-table"));
+        assertThrows(IllegalArgumentException.class, () -> runner.run("--action=restore-table", "--tag=v1"));
+        assertThrows(IllegalArgumentException.class, () -> runner.run("--action=restore-table", "--table=tbl"));
+    }
+
+    @Test
+    @DisplayName("--action=time-travel-sql without tag or timestamp throws exception")
+    void timeTravelMissingArgsShouldThrow() {
+        assertThrows(IllegalArgumentException.class, () -> runner.run("--action=time-travel-sql"));
+    }
+
+    @Test
+    @DisplayName("--action=export-gcs calls exportToGcs()")
+    void exportGcsAction() throws Exception {
+        runner.run("--action=export-gcs", "--tag=v1", "--format=JSON");
+        verify(backupService).exportToGcs("v1", "JSON");
+    }
+
+    @Test
+    @DisplayName("--action=export-gcs without tag throws exception")
+    void exportGcsMissingTagThrows() {
+        assertThrows(IllegalArgumentException.class, () -> runner.run("--action=export-gcs"));
+    }
+
+    @Test
+    @DisplayName("--action=restore-gcs-script calls generateGcsRestoreScript()")
+    void restoreGcsScriptAction() throws Exception {
+        runner.run("--action=restore-gcs-script", "--tag=gs://bucket/path", "--format=CSV");
+        verify(backupService).generateGcsRestoreScript("gs://bucket/path", "CSV");
+    }
+
+    @Test
+    @DisplayName("--action=restore-gcs-script missing tag throws exception")
+    void restoreGcsScriptMissingTagThrows() {
+        assertThrows(IllegalArgumentException.class, () -> runner.run("--action=restore-gcs-script"));
+    }
+
+    @Test
+    @DisplayName("getActiveProfile throws error if multiple profiles active")
+    void multipleProfilesThrowsException() {
+        when(environment.getActiveProfiles()).thenReturn(new String[] { "dev1", "prd" });
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> runner.run("--action=status"));
+        assertTrue(e.getMessage().contains("Exactly one active Spring profile is required"));
     }
 }

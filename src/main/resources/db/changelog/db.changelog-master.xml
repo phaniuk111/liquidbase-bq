@@ -28,4 +28,5 @@
       3. Write your standard BigQuery SQL in the generated `.sql` files.
       ====================================================================
     -->
+    <include file="db/changelog/20260308-073538-test_jar.xml"/>
 </databaseChangeLog>

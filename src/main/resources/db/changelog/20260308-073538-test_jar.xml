@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="20260308-073538-test_jar" author="developer@example.com" context="dev1" labels="TEST-1">
+        <!-- ⚠ PRECONDITION: If this is a destructive change, uncomment and define preconditions -->
+        <!--
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="my_table" columnName="old_column"/>
+        </preConditions>
+        -->
+
+        <!-- Forward SQL -->
+        <sqlFile path="db/changelog/sql/ddl/experimental/20260308-073538-test_jar.sql" splitStatements="true" stripComments="true"/>
+
+        <!-- Reverse SQL -->
+        <rollback>
+            <sqlFile path="db/changelog/sql/rollback/experimental/20260308-073538-test_jar_rollback.sql" splitStatements="true" stripComments="true"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
