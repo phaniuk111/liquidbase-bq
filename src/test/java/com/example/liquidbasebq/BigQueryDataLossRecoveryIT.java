@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 })
 @ActiveProfiles("ci-dataloss")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@Disabled("Disabled by default locally. Runs explicitly in CI via maven-failsafe plugin filtering.")
+@org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "CI", matches = "true", disabledReason = "Runs explicitly in CI via maven-failsafe plugin filtering.")
 class BigQueryDataLossRecoveryIT {
 
     @Autowired

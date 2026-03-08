@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
 })
 @ActiveProfiles("ci-integration")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@Disabled("Disabled by default locally. Runs explicitly in CI via maven-failsafe plugin filtering or when manually invoked.")
+@org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "CI", matches = "true", disabledReason = "Runs explicitly in CI via maven-failsafe plugin filtering or when manually invoked.")
 class BigQueryIntegrationIT {
 
     @Autowired
