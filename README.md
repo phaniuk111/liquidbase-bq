@@ -1,4 +1,4 @@
-# Liquibase BigQuery Schema Manager
+ # Liquibase BigQuery Schema Manager
 
 A **Spring Boot** application that uses [Liquibase](https://www.liquibase.org/) with the [liquibase-bigquery](https://github.com/liquibase/liquibase-bigquery) extension to **version-control Google BigQuery schema changes** — including full support for **nested STRUCT/RECORD columns**, **multi-environment deployment**, and **trunk-based CI/CD**.
 
@@ -117,6 +117,12 @@ java src/main/java/com/example/liquidbasebq/tools/ChangeScaffoldCli.java \
   --name add-payment-table --domain orders --contexts dev,uat,prd --labels feature-123 --author email@example.com --register-master
 ```
 *This command outputs the exact file paths it created so you can start editing immediately.*
+
+**What this creates:**
+1. **DDL SQL File**: `src/main/resources/db/changelog/sql/ddl/<domain>/...sql` (The forward change)
+2. **Rollback SQL File**: `src/main/resources/db/changelog/sql/rollback/<domain>/..._rollback.sql` (The undo logic)
+3. **XML Wrapper**: `src/main/resources/db/changelog/...xml` (Tracks the change metadata, context, and links the SQL files)
+4. **Master File Update**: Appends an `<include>` tag to `db.changelog-master.xml` if `--register-master` is provided.
 
 ### 2. Validate Locally
 Once you have written your SQL in the generated files, run the strict structural validation using the JAR:

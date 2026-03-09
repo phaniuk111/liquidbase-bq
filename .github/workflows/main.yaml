@@ -103,14 +103,18 @@ jobs:
       - name: Set semantic version
         id: version
         run: |
-          POM_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout -B | sed 's/-SNAPSHOT//')
+          # Fetch all tags so git describe works correctly
+          git fetch --tags --force
+          GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          # Strip 'v' prefix if present so SEMVER starts with number (e.g. 1.0.0)
+          CLEAN_TAG=${GIT_TAG#v}
           SHORT_SHA=${GITHUB_SHA::8}
           BUILD_NUM=${{ github.run_number }}
-          SEMVER="${POM_VERSION}-${BUILD_NUM}+${SHORT_SHA}"
+          SEMVER="${CLEAN_TAG}-${BUILD_NUM}+${SHORT_SHA}"
           JAR_FILE="liquidbase-bq-${SEMVER}.jar"
           echo "version=$SEMVER" >> $GITHUB_OUTPUT
           echo "jar_name=$JAR_FILE" >> $GITHUB_OUTPUT
-          echo "📦 Version: $SEMVER"
+          echo "📦 Version: $SEMVER (from tag: $GIT_TAG)"
 
       - name: Package fat JAR
         run: |

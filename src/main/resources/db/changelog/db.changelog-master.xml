@@ -28,4 +28,5 @@
       3. Write your standard BigQuery SQL in the generated `.sql` files.
       ====================================================================
     -->
+    <include file="db/changelog/20260309-062137-rename-customer-active-flag.xml"/>
 </databaseChangeLog>
