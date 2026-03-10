@@ -1,4 +1,4 @@
-# Liquibase BigQuery Schema Manager
+ # Liquibase BigQuery Schema Manager
 
 A **Spring Boot** application that uses [Liquibase](https://www.liquibase.org/) with the [liquibase-bigquery](https://github.com/liquibase/liquibase-bigquery) extension to **version-control Google BigQuery schema changes** — including full support for **nested STRUCT/RECORD columns**, **multi-environment deployment**, and **trunk-based CI/CD**.
 
@@ -6,20 +6,11 @@ A **Spring Boot** application that uses [Liquibase](https://www.liquibase.org/) 
 
 ## Features
 
-| Operation | Method | Changelog |
-|---|---|---|
-| Create tables (flat) | Liquibase `createTable` | `001-create-tables.xml` |
-| Create tables (nested STRUCT) | Raw SQL `CREATE TABLE` | `001-create-tables.xml` |
-| Add columns (flat) | Liquibase `addColumn` | `002-add-columns.xml` |
-| Add columns (STRUCT / ARRAY) | Raw SQL `ALTER TABLE ADD COLUMN` | `002-add-columns.xml` |
-| Modify data types | Liquibase `modifyDataType` + raw SQL | `003-modify-datatypes.xml` |
-| Drop columns | Raw SQL `ALTER TABLE DROP COLUMN` | `004-drop-columns.xml` |
-| Rename columns | Raw SQL `ALTER TABLE RENAME COLUMN` | `005-rename-columns.xml` |
-| Add field inside STRUCT | `CREATE OR REPLACE TABLE ... AS SELECT` | `006-nested-struct-operations.xml` |
-| Drop field inside STRUCT | `CREATE OR REPLACE TABLE ... AS SELECT` | `006-nested-struct-operations.xml` |
-| Modify field inside STRUCT | `CREATE OR REPLACE TABLE ... AS SELECT` | `006-nested-struct-operations.xml` |
-| Add field in ARRAY\<STRUCT\> | `UNNEST` + rebuild array | `006-nested-struct-operations.xml` |
-| Create / drop views | Liquibase `createView` / `dropView` | `007-views.xml` |
+- **SQL-First Development**: Write raw BigQuery SQL (DDL) directly. No need to learn complex Liquibase XML syntax for standard operations.
+- **Automated Scaffolding**: Use the included `ChangeScaffoldCli` tool to automatically generate timestamped SQL execution and rollback files.
+- **Strict Governance**: CI/CD pipelines enforce rollback scripts and valid configurations before merging.
+- **Data-Loss Guardrails**: Automatic point-in-time BigQuery Snapshots are taken before every deployment to safely recover from catastrophic data loss.
+- **Nested Record Support**: Easily manage complex BQ `STRUCT` and `ARRAY` types using standard SQL scripts.
 
 ---
 
@@ -117,6 +108,12 @@ java src/main/java/com/example/liquidbasebq/tools/ChangeScaffoldCli.java \
   --name add-payment-table --domain orders --contexts dev,uat,prd --labels feature-123 --author email@example.com --register-master
 ```
 *This command outputs the exact file paths it created so you can start editing immediately.*
+
+**What this creates:**
+1. **DDL SQL File**: `src/main/resources/db/changelog/sql/ddl/<domain>/...sql` (The forward change)
+2. **Rollback SQL File**: `src/main/resources/db/changelog/sql/rollback/<domain>/..._rollback.sql` (The undo logic)
+3. **XML Wrapper**: `src/main/resources/db/changelog/...xml` (Tracks the change metadata, context, and links the SQL files)
+4. **Master File Update**: Appends an `<include>` tag to `db.changelog-master.xml` if `--register-master` is provided.
 
 ### 2. Validate Locally
 Once you have written your SQL in the generated files, run the strict structural validation using the JAR:
@@ -285,21 +282,9 @@ java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar --spring.profiles.active=prd -
 
 ## Rollback
 
-### Rollback to a Tag
+Every changelog file creates a tag after its operations if specified, but the primary method is using the CI/CD automated tags.
 
-Every changelog file creates a tag after its operations. Available tags:
-
-| Tag | After |
-|---|---|
-| `baseline-v1` | Initial table creation |
-| `columns-added-v2` | Column additions |
-| `datatypes-modified-v3` | Datatype modifications |
-| `columns-dropped-v4` | Column drops |
-| `columns-renamed-v5` | Column renames |
-| `nested-struct-ops-v6` | Nested STRUCT operations |
-| `views-created-v7` | View creation |
-
-CI/CD also creates `pre-deploy-{version}` and `post-deploy-{version}` tags on each deployment.
+CI/CD creates `pre-deploy-{version}` tags on each deployment (e.g., `pre-deploy-1.0.0-45+a1b2c3d4`).
 
 ```bash
 # Rollback UAT1 to baseline
@@ -316,6 +301,25 @@ java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
 java -jar target/liquidbase-bq-1.0.0-SNAPSHOT.jar \
   --spring.profiles.active=uat2 \
   --action=rollback-count --count=3
+```
+
+---
+
+## 🛡️ Rollback & Data Recovery Policy
+
+This project distinguishes between **structural changes** and **proactive data protection**.
+
+### 1. Routine Rollbacks (Developer Task)
+For non-destructive changes (e.g., `addColumn`, `renameColumn`, `createView`), you **must** provide a standard Liquibase `<rollback>` block with the inverse SQL. This allows for safe local development and PR testing.
+- **Example**: If you add a column, the rollback should be `ALTER TABLE ... DROP COLUMN`.
+
+### 2. Proactive Guardrails & Emergency Recovery
+We have multi-layered protection for both obvious and "silent" data loss (e.g., data type changes):
+- **PR Risk Detection**: Every Pull Request dry-runs SQL against a DEV environment. Our CI (`feature.yaml`) automatically flags risky operations like `DROP`, `TRUNCATE`, and `SET DATA TYPE` with warnings in PR comments.
+- **Automated Snapshots**: Our deployment pipeline (`main.yaml`) is configured to run `--action=backup` **immediately before every deployment** to any environment. This ensures a guaranteed point-in-time recovery option exists for every version of your database.
+- **Emergency Restoration**: For catastrophic data loss, do **not** attempt to hardcode restoration in your changelog. Instead, use the `restore` CLI action to pull from the specific snapshot taken during that deployment:
+```bash
+java -jar app.jar --action=restore --tag=pre-deploy-v1.2.3
 ```
 
 ---
@@ -407,13 +411,10 @@ liquidbase-bq/
         │   └── prd/
         └── db/changelog/
             ├── db.changelog-master.xml         # Master changelog
-            ├── 001-create-tables.xml           # Tables (flat + nested)
-            ├── 002-add-columns.xml             # Add columns
-            ├── 003-modify-datatypes.xml        # Modify data types
-            ├── 004-drop-columns.xml            # Drop columns
-            ├── 005-rename-columns.xml          # Rename columns
-            ├── 006-nested-struct-operations.xml # Nested STRUCT workarounds
-            └── 007-views.xml                   # Create/drop views
+            ├── <timestamp>-<name>.xml          # Generated Migration Wrapper
+            └── sql/
+                ├── ddl/<domain>/*.sql          # Forward SQL scripts
+                └── rollback/<domain>/*_rollback.sql # Rollback SQL scripts
 ```
 
 ---

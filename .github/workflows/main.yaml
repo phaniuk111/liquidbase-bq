@@ -94,6 +94,7 @@ jobs:
 
       - name: Validate changelog XML
         run: |
+          sudo apt-get update && sudo apt-get install -y libxml2-utils
           for f in src/main/resources/db/changelog/*.xml; do
             xmllint --noout "$f" 2>&1 || exit 1
           done
@@ -102,14 +103,37 @@ jobs:
       - name: Set semantic version
         id: version
         run: |
-          POM_VERSION=$(./mvnw help:evaluate -Dexpression=project.version -q -DforceStdout -B | sed 's/-SNAPSHOT//')
-          SHORT_SHA=${GITHUB_SHA::8}
-          BUILD_NUM=${{ github.run_number }}
-          SEMVER="${POM_VERSION}-${BUILD_NUM}+${SHORT_SHA}"
+          # Fetch all tags so git describe works correctly
+          git fetch --tags --force
+          GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          
+          # Strip 'v' prefix if present
+          CLEAN_TAG=${GIT_TAG#v}
+          
+          # Parse version components
+          IFS='.' read -r major minor patch <<< "$CLEAN_TAG"
+          
+          # Default to 0.0.0 if parsing fails
+          major=${major:-0}
+          minor=${minor:-0}
+          patch=${patch:-0}
+          
+          # Increment patch version
+          NEW_PATCH=$((patch + 1))
+          NEW_SEMVER="${major}.${minor}.${NEW_PATCH}"
+          NEW_TAG="v${NEW_SEMVER}"
+          
+          # Push the new tag to the repository
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag $NEW_TAG
+          git push origin $NEW_TAG
+          
+          SEMVER="${NEW_SEMVER}"
           JAR_FILE="liquidbase-bq-${SEMVER}.jar"
           echo "version=$SEMVER" >> $GITHUB_OUTPUT
           echo "jar_name=$JAR_FILE" >> $GITHUB_OUTPUT
-          echo "📦 Version: $SEMVER"
+          echo "📦 Incremented Version: $SEMVER (new tag: $NEW_TAG)"
 
       - name: Package fat JAR
         run: |

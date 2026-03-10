@@ -21,8 +21,6 @@ import jakarta.annotation.PostConstruct;
  * <p>
  * Strategies (ordered by retention):
  * <ol>
- * <li><b>Time Travel</b> — Built-in, up to 7 days, zero cost. No action
- * needed.</li>
  * <li><b>Table Snapshots</b> — Configurable expiration (default 30 days), zero
  * incremental cost.</li>
  * <li><b>Dataset Copy</b> — Permanent, full storage cost. Good for
@@ -147,6 +145,9 @@ public class BigQueryBackupService {
 
     /**
      * Restore multiple tables from their snapshots.
+     * <p>
+     * <b>Administrative Action:</b> This is intended for emergency data recovery
+     * via the CLI and should not be hardcoded into Liquibase changelogs.
      * <p>
      * <b>WARNING (Non-Atomic Operation):</b> BigQuery does not support multi-table
      * transactions. If a restore operation fails mid-way (e.g., table 5 of 10
@@ -427,27 +428,9 @@ public class BigQueryBackupService {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // STRATEGY 4: Time Travel Query (built-in, up to 7 days)
     // ═══════════════════════════════════════════════════════════════════
-
-    /**
-     * Generate time-travel SQL for recovering data from a specific point in time.
-     * BigQuery retains data for 7 days by default.
-     */
-    public String generateTimeTravelSql(String tableName, String timestamp) {
-        String safeTableName = tableName.replaceAll("[^a-zA-Z0-9_]", "_");
-        String sql = String.format(
-                "-- Time Travel Recovery: %s at %s\n" +
-                        "CREATE OR REPLACE TABLE `%s.%s.%s` AS\n" +
-                        "SELECT * FROM `%s.%s.%s`\n" +
-                        "FOR SYSTEM_TIME AS OF TIMESTAMP '%s'",
-                safeTableName, timestamp,
-                projectId, datasetId, safeTableName,
-                projectId, datasetId, safeTableName,
-                timestamp);
-        log.info("Time-travel SQL generated for {} at {}", safeTableName, timestamp);
-        return sql;
-    }
+    // Snapshots: Primary Data Loss Recovery Mechanism
+    // ═══════════════════════════════════════════════════════════════════
 
     // ═══════════════════════════════════════════════════════════════════
     // AUTO BACKUP (for CI/CD)

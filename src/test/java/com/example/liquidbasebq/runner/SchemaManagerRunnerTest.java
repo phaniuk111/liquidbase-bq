@@ -205,15 +205,6 @@ class SchemaManagerRunnerTest {
         verify(backupService).restoreFromSnapshots("dev1_20260306_120000");
     }
 
-    @Test
-    @DisplayName("--action=time-travel-sql should call generateTimeTravelSql()")
-    void timeTravelSqlAction() throws Exception {
-        when(backupService.generateTimeTravelSql("orders", "2026-03-06 04:00:00 UTC"))
-                .thenReturn("SELECT * FROM orders FOR SYSTEM_TIME...");
-        runner.run("--action=time-travel-sql", "--tag=orders", "--timestamp=2026-03-06 04:00:00 UTC");
-        verify(backupService).generateTimeTravelSql("orders", "2026-03-06 04:00:00 UTC");
-    }
-
     @ParameterizedTest
     @ValueSource(strings = { "unknown", "deploy", "migrate", "INVALID" })
     @DisplayName("unknown actions should throw IllegalArgumentException")

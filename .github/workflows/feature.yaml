@@ -28,6 +28,10 @@ jobs:
   build-test-validate:
     name: Build, Test & Validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
 
     steps:
       - name: Checkout code
@@ -57,6 +61,7 @@ jobs:
       - name: Validate changelog XML
         run: |
           echo "Validating Liquibase changelog structure..."
+          sudo apt-get update && sudo apt-get install -y libxml2-utils
           for f in src/main/resources/db/changelog/*.xml; do
             echo "  ✓ Validating: $f"
             xmllint --noout "$f" 2>&1 || exit 1
@@ -65,6 +70,9 @@ jobs:
 
       - name: Strict Changeset Validation
         id: validate-strict
+        env:
+          BQ_PROJECT_ID: dummy_project
+          BQ_DATASET_ID: dummy_dataset
         run: |
           echo "Running strict structural and risk validation..."
           VALIDATION_OUT=$(./mvnw spring-boot:run -q -B \
@@ -98,6 +106,7 @@ jobs:
   dry-run-dev:
     name: Dry-Run SQL (DEV)
     runs-on: ubuntu-latest
+    environment: dev
     needs: build-test-validate
     permissions:
       contents: read
@@ -119,8 +128,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
-          service_account: ${{ secrets.DEV_SA_EMAIL }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.SA_EMAIL }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -134,8 +143,8 @@ jobs:
       - name: Generate update SQL (dry-run)
         id: dry-run
         env:
-          BQ_PROJECT_ID: ${{ secrets.DEV_BQ_PROJECT_ID }}
-          BQ_DATASET_ID: ${{ secrets.DEV_BQ_DATASET_ID }}
+          BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
+          BQ_DATASET_ID: ${{ secrets.BQ_DATASET_ID }}
         run: |
           echo "Generating SQL for DEV environment..."
           ./mvnw spring-boot:run -q -B \

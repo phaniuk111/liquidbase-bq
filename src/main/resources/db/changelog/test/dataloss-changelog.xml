@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.33.xsd">
+
+    <!-- Scenario A: Snapshot Delete Recovery -->
+    <changeSet id="destroy-delete-table" author="integration-test">
+        <comment>Catastrophic DELETE of a table with legacy data</comment>
+        <sql>
+            DELETE FROM legacy_users_delete WHERE true;
+        </sql>
+        <rollback>
+            <!-- 
+               Snapshot Rollback: 
+               Restoring data from the explicit snapshot table created 
+               during the integration test setup.
+            -->
+            <sql>
+                <!-- 
+                   Snapshot-Based Recovery:
+                   We pull data directly from the explicit snapshot we took 
+                   before the destruction.
+                -->
+                INSERT INTO legacy_users_delete (id, name)
+                SELECT * FROM legacy_users_delete_snapshot;
+            </sql>
+        </rollback>
+    </changeSet>
+
+    <!-- Scenario B: Explicit Snapshot Truncate Recovery -->
+    <changeSet id="destroy-truncate-table" author="integration-test">
+        <comment>Catastrophic TRUNCATE of a table with legacy data</comment>
+        <sql>
+            TRUNCATE TABLE legacy_users_trunc;
+        </sql>
+        <rollback>
+            <!-- 
+               Explicit Snapshot Rollback: 
+               The integration test runs java to create `legacy_users_trunc_snapshot` 
+               BEFORE running Liquibase. This pulls the data back out of the snapshot.
+            -->
+            <sql>
+                INSERT INTO legacy_users_trunc
+                SELECT * FROM legacy_users_trunc_snapshot;
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

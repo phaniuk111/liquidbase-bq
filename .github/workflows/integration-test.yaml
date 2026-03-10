@@ -5,6 +5,12 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: 'read'
+  id-token: 'write'
+  checks: 'write'
+  pull-requests: 'write'
+
 env:
   # Using the GCP project configured for DEV
   BQ_PROJECT_ID: ${{ secrets.BQ_PROJECT_ID }}
@@ -14,6 +20,7 @@ env:
 jobs:
   integration-test:
     runs-on: ubuntu-latest
+    environment: dev
 
     steps:
     - uses: actions/checkout@v4
@@ -24,6 +31,12 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: maven
+
+    - name: Download and Install Simba Driver
+      run: |
+        wget -q https://storage.googleapis.com/simba-bq-release/jdbc/SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || echo "Failed to download, assuming cached or unavailable"
+        unzip -q SimbaJDBCDriverforGoogleBigQuery42_1.6.3.1004.zip || true
+        ./mvnw install:install-file -Dfile=GoogleBigQueryJDBC42.jar -DgroupId=com.simba.googlebigquery.jdbc -DartifactId=GoogleBigQueryJDBC42 -Dversion=1.6.3.1004 -Dpackaging=jar -q
 
     - name: Authenticate to Google Cloud
       id: auth
@@ -45,6 +58,15 @@ jobs:
       # We skip Surefire unit tests here since they run in feature.yaml, and only run the Failsafe *IT tests
       run: |
         ./mvnw -B verify -Pci-integration -Dskip.surefire.tests=true
+
+    - name: Publish Test Report to Job Summary
+      uses: dorny/test-reporter@v1
+      if: always()
+      with:
+        name: Integration Test Scenarios
+        path: target/failsafe-reports/TEST-*.xml
+        reporter: java-junit
+        fail-on-error: false
 
     - name: Always Cleanup Sandbox Dataset
       # This step MUST run regardless of whether the tests passed or failed!

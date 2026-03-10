@@ -57,7 +57,6 @@ public class SchemaManagerRunner implements CommandLineRunner {
         String tag = null;
         String table = null;
         int count = 1;
-        String timestamp = null;
         String format = null;
 
         // Parse CLI arguments
@@ -78,8 +77,6 @@ public class SchemaManagerRunner implements CommandLineRunner {
                     throw new IllegalArgumentException(
                             "Invalid value for --count it must be a valid integer, e.g., --count=3", e);
                 }
-            } else if (arg.startsWith("--timestamp=")) {
-                timestamp = arg.substring("--timestamp=".length());
             } else if (arg.startsWith("--format=")) {
                 format = arg.substring("--format=".length());
             }
@@ -217,16 +214,6 @@ public class SchemaManagerRunner implements CommandLineRunner {
                 log.warn("⚠ Restoring single table '{}' on [{}] from snapshot: {}", table, profile, tag);
                 backupService.restoreTableFromSnapshot(tag, table);
                 log.info("Single-table restore of '{}' from snapshot '{}' completed on [{}].", table, tag, profile);
-                break;
-
-            case "time-travel-sql":
-                if (tag == null || tag.isBlank() || timestamp == null || timestamp.isBlank()) {
-                    throw new IllegalArgumentException(
-                            "Time-travel requires --tag=<TABLE_NAME> --timestamp=<TIMESTAMP>\n" +
-                                    "Example: --tag=orders --timestamp=\"2026-03-06 04:00:00 UTC\"");
-                }
-                String ttSql = backupService.generateTimeTravelSql(tag, timestamp);
-                log.info("Time-travel recovery SQL:\n{}", ttSql);
                 break;
 
             // ──────────── GCS EXPORT (long-term) ────────────
